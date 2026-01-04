@@ -1,0 +1,32 @@
+services:
+  pia-wg-refresh:
+    image: ccarpinteri/pia-wg-refresh:latest
+    container_name: pia-wg-refresh
+    environment:
+      # Required: PIA credentials and region.
+      - PIA_USERNAME=your_user
+      - PIA_PASSWORD=your_pass
+      - PIA_REGION=aus_melbourne
+      # Required: target container name for connectivity checks and restarts.
+      - GLUETUN_CONTAINER=gluetun
+      # Optional: override defaults.
+      # - CHECK_URL=https://www.google.com/generate_204
+      # - CHECK_INTERVAL_SECONDS=60
+      # - FAIL_THRESHOLD=3
+      # - LOG_LEVEL=info
+      # Optional: download an updated pia-wg-config at startup.
+      # - PIA_WG_CONFIG_URL=https://example.com/pia-wg-config
+      # - PIA_WG_CONFIG_SHA256=...
+    volumes:
+      # Mount Gluetun WireGuard config directory so wg0.conf can be replaced.
+      - ${DOCKER_PATH}/gluetun/config/wireguard:/config
+      # Persist logs on the host.
+      - ${DOCKER_PATH}/pia-wg-refresh/logs:/logs
+      # Docker socket for docker exec/restart.
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "ps | grep -q '[r]efresh-loop.sh'"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

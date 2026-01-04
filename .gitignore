@@ -1,0 +1,31 @@
+# Logs
+*.log
+logs/
+
+# Environment files
+.env
+.env.*
+
+# Temporary files
+*.tmp
+*.bak
+*.bak-*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Claude Code
+.claude/
+
+# Docker
+.docker/
+
+# Test artifacts
+/tmp/
