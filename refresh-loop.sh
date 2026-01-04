@@ -137,24 +137,27 @@ generate_config() {
 # Exit codes: 0 = success, 1 = failure, 2 = container restarting
 check_connectivity() {
   err_file="/tmp/check_connectivity_err.$$"
+  rm -f "$err_file"
 
-  docker exec "$GLUETUN_CONTAINER" sh -c '
-    url="$1"
-    if command -v wget >/dev/null 2>&1; then
-      wget -qO- "$url" >/dev/null 2>&1
-      exit $?
-    fi
-    if command -v curl >/dev/null 2>&1; then
-      curl -fsSL "$url" >/dev/null 2>&1
-      exit $?
-    fi
-    if command -v busybox >/dev/null 2>&1; then
-      busybox wget -qO- "$url" >/dev/null 2>&1
-      exit $?
-    fi
-    exit 127
-  ' sh "$CHECK_URL" 2>"$err_file"
-  result=$?
+  if docker exec "$GLUETUN_CONTAINER" sh -c '
+      url="$1"
+      if command -v wget >/dev/null 2>&1; then
+        wget -qO- "$url" >/dev/null 2>&1
+        exit $?
+      fi
+      if command -v curl >/dev/null 2>&1; then
+        curl -fsSL "$url" >/dev/null 2>&1
+        exit $?
+      fi
+      if command -v busybox >/dev/null 2>&1; then
+        busybox wget -qO- "$url" >/dev/null 2>&1
+        exit $?
+      fi
+      exit 127
+    ' sh "$CHECK_URL" 2>"$err_file"; then
+    rm -f "$err_file"
+    return 0
+  fi
 
   # Check if container is restarting
   if [ -f "$err_file" ] && grep -q "is restarting" "$err_file"; then
@@ -163,7 +166,7 @@ check_connectivity() {
   fi
   rm -f "$err_file"
 
-  return $result
+  return 1
 }
 
 restart_gluetun() {
