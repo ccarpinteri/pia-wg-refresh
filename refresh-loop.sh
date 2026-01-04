@@ -88,6 +88,8 @@ backup_config() {
     ts=$(date -u "+%Y%m%d%H%M%S")
     cp -p "$WG_CONF_PATH" "$WG_CONF_PATH.bak-$ts"
     log info "Backed up existing config to $WG_CONF_PATH.bak-$ts"
+  else
+    log info "No existing config found, creating new"
   fi
 }
 
@@ -132,8 +134,9 @@ generate_config() {
   return 0
 }
 
+# Exit codes: 0 = success, 1 = failure, 2 = container restarting
 check_connectivity() {
-  docker exec "$GLUETUN_CONTAINER" sh -c '
+  err_output=$(docker exec "$GLUETUN_CONTAINER" sh -c '
     url="$1"
     if command -v wget >/dev/null 2>&1; then
       wget -qO- "$url" >/dev/null 2>&1
@@ -148,7 +151,14 @@ check_connectivity() {
       exit $?
     fi
     exit 127
-  ' sh "$CHECK_URL"
+  ' sh "$CHECK_URL" 2>&1) && return 0
+
+  # Check if container is restarting
+  if echo "$err_output" | grep -q "is restarting"; then
+    return 2
+  fi
+
+  return 1
 }
 
 restart_gluetun() {
@@ -176,7 +186,10 @@ tunnel_confirmed=0
 log info "Starting refresh loop (interval=${CHECK_INTERVAL_SECONDS}s, healthy_interval=${HEALTHY_CHECK_INTERVAL_SECONDS}s, threshold=$FAIL_THRESHOLD, max_retries=$MAX_GENERATION_RETRIES)"
 
 while true; do
-  if check_connectivity; then
+  check_connectivity
+  check_result=$?
+
+  if [ "$check_result" -eq 0 ]; then
     # First success after startup or recovery
     if [ "$tunnel_confirmed" -eq 0 ]; then
       log info "Tunnel up"
@@ -198,6 +211,10 @@ while true; do
 
     # Use longer interval when healthy
     sleep "$HEALTHY_CHECK_INTERVAL_SECONDS"
+  elif [ "$check_result" -eq 2 ]; then
+    # Container is restarting, skip this check without counting as failure
+    log info "Container is restarting, skipping check"
+    sleep "$CHECK_INTERVAL_SECONDS"
   else
     failure_count=$((failure_count + 1))
     success_count=0
