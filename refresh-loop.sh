@@ -121,13 +121,7 @@ generate_config() {
 
   backup_config
 
-  PIA_USERNAME="$PIA_USERNAME" \
-  PIA_PASSWORD="$PIA_PASSWORD" \
-  PIA_REGION="$PIA_REGION" \
-  REGION="$PIA_REGION" \
-  PIA_USER="$PIA_USERNAME" \
-  PIA_PASS="$PIA_PASSWORD" \
-  "$PIA_WG_CONFIG_BIN" >>"$PIA_LOG" 2>&1
+  "$PIA_WG_CONFIG_BIN" -r "$PIA_REGION" -o "$WG_CONF_PATH" "$PIA_USERNAME" "$PIA_PASSWORD" >>"$PIA_LOG" 2>&1
 
   if ! validate_config "$WG_CONF_PATH"; then
     restore_backup
