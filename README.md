@@ -8,11 +8,11 @@ PIA WireGuard sessions can expire. If Gluetun restarts or loses the tunnel after
 
 ## How it works
 
-Every `CHECK_INTERVAL_SECONDS`:
-
-1. `docker exec` into Gluetun to check connectivity.
-2. Track consecutive failures.
-3. On `FAIL_THRESHOLD`, generate a new config, replace `wg0.conf`, and restart Gluetun.
+1. Check connectivity by running `docker exec` into Gluetun.
+2. When healthy, check every `HEALTHY_CHECK_INTERVAL_SECONDS` (default 5 minutes).
+3. On failure, switch to faster checks every `CHECK_INTERVAL_SECONDS` (default 60s).
+4. After `FAIL_THRESHOLD` consecutive failures, generate a new config and restart Gluetun.
+5. If config generation fails repeatedly, stop retrying after `MAX_GENERATION_RETRIES` until connectivity recovers.
 
 ## Requirements
 
@@ -32,9 +32,12 @@ Optional:
 - `GLUETUN_CONTAINER` (default: `gluetun`)
 - `WG_CONF_PATH` (default: `/config/wg0.conf`)
 - `CHECK_URL` (default: `https://www.google.com/generate_204`)
-- `CHECK_INTERVAL_SECONDS` (default: `60`)
-- `FAIL_THRESHOLD` (default: `3`)
-- `LOG_LEVEL` (default: `info`)
+- `CHECK_INTERVAL_SECONDS` (default: `60`) - interval when tunnel is down or degraded
+- `HEALTHY_CHECK_INTERVAL_SECONDS` (default: `300`) - interval when tunnel is healthy
+- `FAIL_THRESHOLD` (default: `3`) - consecutive failures before regenerating config
+- `MAX_GENERATION_RETRIES` (default: `3`) - max config generation attempts before waiting for recovery
+- `HEALTH_LOG_INTERVAL` (default: `10`) - log "Tunnel healthy" every N successful checks
+- `LOG_LEVEL` (default: `info`) - set to `debug` for verbose logging
 - `PIA_WG_CONFIG_BIN` (default: `/usr/local/bin/pia-wg-config`)
 - `PIA_WG_CONFIG_URL` (optional: if set, download/replace `pia-wg-config` on startup)
 - `PIA_WG_CONFIG_SHA256` (optional: verify the download before installing)
@@ -55,12 +58,19 @@ services:
   gluetun:
     image: qmcgaw/gluetun
     container_name: gluetun
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
     volumes:
       - ${DOCKER_PATH}/gluetun/config:/gluetun
-      - ${DOCKER_PATH}/gluetun/config/wireguard/wg0.conf:/gluetun/wireguard/wg0.conf
+    environment:
+      - VPN_SERVICE_PROVIDER=custom
+      - VPN_TYPE=wireguard
+    restart: unless-stopped
 
   pia-wg-refresh:
-    image: ccarpinteri/pia-wg-refresh
+    image: ghcr.io/ccarpinteri/pia-wg-refresh:latest
     container_name: pia-wg-refresh
     environment:
       - PIA_USERNAME=your_user

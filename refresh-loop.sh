@@ -169,28 +169,56 @@ if [ "$SELF_TEST" = "1" ]; then
 fi
 
 failure_count=0
+generation_failures=0
+success_count=0
+tunnel_confirmed=0
 
-log info "Starting refresh loop (interval=${CHECK_INTERVAL_SECONDS}s, threshold=$FAIL_THRESHOLD)"
+log info "Starting refresh loop (interval=${CHECK_INTERVAL_SECONDS}s, healthy_interval=${HEALTHY_CHECK_INTERVAL_SECONDS}s, threshold=$FAIL_THRESHOLD, max_retries=$MAX_GENERATION_RETRIES)"
 
 while true; do
   if check_connectivity; then
-    if [ "$failure_count" -ne 0 ]; then
+    # First success after startup or recovery
+    if [ "$tunnel_confirmed" -eq 0 ]; then
+      log info "Tunnel up"
+      tunnel_confirmed=1
+    elif [ "$failure_count" -ne 0 ]; then
       log info "Connectivity restored"
     fi
+
     failure_count=0
+    generation_failures=0
+    success_count=$((success_count + 1))
+
+    log debug "Connectivity check passed ($success_count)"
+
+    # Periodic health log at info level
+    if [ "$((success_count % HEALTH_LOG_INTERVAL))" -eq 0 ]; then
+      log info "Tunnel healthy (${success_count} consecutive checks)"
+    fi
+
+    # Use longer interval when healthy
+    sleep "$HEALTHY_CHECK_INTERVAL_SECONDS"
   else
     failure_count=$((failure_count + 1))
+    success_count=0
+    tunnel_confirmed=0
     log warn "Connectivity check failed ($failure_count/$FAIL_THRESHOLD)"
-  fi
 
-  if [ "$failure_count" -ge "$FAIL_THRESHOLD" ]; then
-    if generate_config; then
-      restart_gluetun
-      failure_count=0
-    else
-      log error "Config generation failed"
+    if [ "$failure_count" -ge "$FAIL_THRESHOLD" ]; then
+      if [ "$generation_failures" -ge "$MAX_GENERATION_RETRIES" ]; then
+        log error "Max generation retries ($MAX_GENERATION_RETRIES) reached, waiting for connectivity to recover"
+      elif generate_config; then
+        restart_gluetun
+        failure_count=0
+        generation_failures=0
+      else
+        generation_failures=$((generation_failures + 1))
+        log error "Config generation failed ($generation_failures/$MAX_GENERATION_RETRIES)"
+        failure_count=0
+      fi
     fi
-  fi
 
-  sleep "$CHECK_INTERVAL_SECONDS"
+    # Use shorter interval when degraded
+    sleep "$CHECK_INTERVAL_SECONDS"
+  fi
 done
