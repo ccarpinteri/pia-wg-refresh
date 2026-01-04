@@ -194,8 +194,12 @@ tunnel_confirmed=0
 log info "Starting refresh loop (interval=${CHECK_INTERVAL_SECONDS}s, healthy_interval=${HEALTHY_CHECK_INTERVAL_SECONDS}s, threshold=$FAIL_THRESHOLD, max_retries=$MAX_GENERATION_RETRIES)"
 
 while true; do
-  check_connectivity
-  check_result=$?
+  # Use if/elif to capture exit code without triggering set -e
+  if check_connectivity; then
+    check_result=0
+  else
+    check_result=$?
+  fi
 
   if [ "$check_result" -eq 0 ]; then
     # First success after startup or recovery
