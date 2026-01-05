@@ -134,10 +134,14 @@ generate_config() {
   return 0
 }
 
-# Exit codes: 0 = success, 1 = failure, 2 = container restarting
+# Exit codes: 0 = success, 1 = failure
 check_connectivity() {
-  err_file="/tmp/check_connectivity_err.$$"
-  rm -f "$err_file"
+  # First check if container is stuck in a restart loop using docker inspect
+  # This is more reliable than parsing stderr from docker exec
+  if [ "$(docker inspect "$GLUETUN_CONTAINER" --format '{{.State.Restarting}}' 2>/dev/null)" = "true" ]; then
+    log debug "Container $GLUETUN_CONTAINER is in restart loop (detected via docker inspect)"
+    return 1
+  fi
 
   if docker exec "$GLUETUN_CONTAINER" sh -c '
       url="$1"
@@ -154,17 +158,9 @@ check_connectivity() {
         exit $?
       fi
       exit 127
-    ' sh "$CHECK_URL" 2>"$err_file"; then
-    rm -f "$err_file"
+    ' sh "$CHECK_URL" 2>/dev/null; then
     return 0
   fi
-
-  # Check if container is restarting
-  if [ -f "$err_file" ] && grep -q "is restarting" "$err_file"; then
-    rm -f "$err_file"
-    return 2
-  fi
-  rm -f "$err_file"
 
   return 1
 }
@@ -194,14 +190,7 @@ tunnel_confirmed=0
 log info "Starting refresh loop (interval=${CHECK_INTERVAL_SECONDS}s, healthy_interval=${HEALTHY_CHECK_INTERVAL_SECONDS}s, threshold=$FAIL_THRESHOLD, max_retries=$MAX_GENERATION_RETRIES)"
 
 while true; do
-  # Use if/elif to capture exit code without triggering set -e
   if check_connectivity; then
-    check_result=0
-  else
-    check_result=$?
-  fi
-
-  if [ "$check_result" -eq 0 ]; then
     # First success after startup or recovery
     if [ "$tunnel_confirmed" -eq 0 ]; then
       log info "Tunnel up"
@@ -223,10 +212,6 @@ while true; do
 
     # Use longer interval when healthy
     sleep "$HEALTHY_CHECK_INTERVAL_SECONDS"
-  elif [ "$check_result" -eq 2 ]; then
-    # Container is restarting, skip this check without counting as failure
-    log info "Container is restarting, skipping check"
-    sleep "$CHECK_INTERVAL_SECONDS"
   else
     failure_count=$((failure_count + 1))
     success_count=0
