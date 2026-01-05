@@ -2,6 +2,8 @@
 
 Refreshes PIA WireGuard configs for Gluetun only when the tunnel is actually down. It runs alongside Gluetun in Docker, regenerates `wg0.conf` with a bundled `pia-wg-config` binary built from source, and restarts the Gluetun container only after consecutive failures.
 
+This project wraps [pia-wg-config](https://github.com/kylegrantlucas/pia-wg-config) by Kyle Lucas, which generates WireGuard configurations for Private Internet Access. It is [recommended by the Gluetun documentation](https://github.com/qdm12/gluetun-wiki/blob/main/setup/providers/private-internet-access.md#wireguard) for PIA WireGuard setups.
+
 ## Why
 
 PIA WireGuard sessions can expire. If Gluetun restarts or loses the tunnel after expiry, it can get stuck until a fresh config is generated. This container monitors connectivity inside Gluetun and regenerates the config only when needed.
@@ -109,3 +111,7 @@ Run `make test-bundled` or `make test-download` to exercise a single path.
 ## Build args
 
 - `PIA_WG_CONFIG_REF` (default: `main`) sets the git ref used to build `pia-wg-config` in the Dockerfile.
+
+## License
+
+MIT
