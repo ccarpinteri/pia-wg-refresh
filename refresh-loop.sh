@@ -9,6 +9,13 @@ DOCKER_LOG="$LOG_DIR/docker.log"
 : "${PIA_WG_CONFIG_SHA256:=}"
 : "${SELF_TEST:=0}"
 
+# ANSI color codes
+COLOR_RESET="\033[0m"
+COLOR_CYAN="\033[36m"
+COLOR_GREEN="\033[32m"
+COLOR_YELLOW="\033[33m"
+COLOR_RED="\033[31m"
+
 log_level() {
   case "$LOG_LEVEL" in
     debug) echo 0 ;;
@@ -32,13 +39,28 @@ log_should_write() {
   [ "$level_num" -ge "$current" ]
 }
 
+log_color() {
+  level="$1"
+  case "$level" in
+    debug) echo "$COLOR_CYAN" ;;
+    info) echo "$COLOR_GREEN" ;;
+    warn) echo "$COLOR_YELLOW" ;;
+    error) echo "$COLOR_RED" ;;
+    *) echo "" ;;
+  esac
+}
+
 log() {
   level="$1"
   shift
   if log_should_write "$level"; then
     ts=$(date -u "+%Y-%m-%dT%H:%M:%SZ")
     msg="$*"
-    echo "$ts [$level] $msg" | tee -a "$LOG_FILE"
+    color=$(log_color "$level")
+    # Colored output to stdout (for docker logs)
+    printf "%s %b[%s]%b %s\n" "$ts" "$color" "$level" "$COLOR_RESET" "$msg"
+    # Plain text to log file
+    echo "$ts [$level] $msg" >> "$LOG_FILE"
   fi
 }
 
@@ -143,22 +165,8 @@ check_connectivity() {
     return 1
   fi
 
-  if docker exec "$GLUETUN_CONTAINER" sh -c '
-      url="$1"
-      if command -v wget >/dev/null 2>&1; then
-        wget -qO- "$url" >/dev/null 2>&1
-        exit $?
-      fi
-      if command -v curl >/dev/null 2>&1; then
-        curl -fsSL "$url" >/dev/null 2>&1
-        exit $?
-      fi
-      if command -v busybox >/dev/null 2>&1; then
-        busybox wget -qO- "$url" >/dev/null 2>&1
-        exit $?
-      fi
-      exit 127
-    ' sh "$CHECK_URL" 2>/dev/null; then
+  # Use wget with 10 second timeout to avoid hanging on DNS issues
+  if docker exec "$GLUETUN_CONTAINER" wget -T 10 -qO- "$CHECK_URL" >/dev/null 2>&1; then
     return 0
   fi
 
@@ -186,10 +194,17 @@ failure_count=0
 generation_failures=0
 success_count=0
 tunnel_confirmed=0
+first_check=1
 
 log info "Starting refresh loop (interval=${CHECK_INTERVAL_SECONDS}s, healthy_interval=${HEALTHY_CHECK_INTERVAL_SECONDS}s, threshold=$FAIL_THRESHOLD, max_retries=$MAX_GENERATION_RETRIES)"
 
 while true; do
+  if [ "$first_check" -eq 1 ]; then
+    log info "Waiting for tunnel..."
+    first_check=0
+  fi
+
+  log debug "Running connectivity check..."
   if check_connectivity; then
     # First success after startup or recovery
     if [ "$tunnel_confirmed" -eq 0 ]; then
@@ -216,7 +231,12 @@ while true; do
     failure_count=$((failure_count + 1))
     success_count=0
     tunnel_confirmed=0
-    log warn "Connectivity check failed ($failure_count/$FAIL_THRESHOLD)"
+
+    if [ "$failure_count" -ge "$FAIL_THRESHOLD" ]; then
+      log warn "Connectivity check failed ($failure_count/$FAIL_THRESHOLD)"
+    else
+      log debug "Connectivity check failed ($failure_count/$FAIL_THRESHOLD)"
+    fi
 
     if [ "$failure_count" -ge "$FAIL_THRESHOLD" ]; then
       if [ "$generation_failures" -ge "$MAX_GENERATION_RETRIES" ]; then

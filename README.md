@@ -47,9 +47,17 @@ Optional:
 
 Logs are append-only in `/logs`:
 
-- `/logs/refresh.log`
-- `/logs/pia-wg-config.log`
-- `/logs/docker.log`
+- `/logs/refresh.log` - main refresh loop logs (plain text)
+- `/logs/pia-wg-config.log` - output from config generation
+- `/logs/docker.log` - output from docker restart commands
+
+Console output (`docker logs`) includes colored log levels for easier reading:
+- `[debug]` - cyan
+- `[info]` - green
+- `[warn]` - yellow
+- `[error]` - red
+
+Log files are kept as plain text without color codes.
 
 ## Docker Compose example
 
