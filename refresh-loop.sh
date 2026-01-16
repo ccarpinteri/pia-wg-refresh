@@ -150,7 +150,39 @@ generate_config() {
   if [ "$PIA_PORT_FORWARDING" = "true" ]; then
     pf_flag="-p"
   fi
-  "$PIA_WG_CONFIG_BIN" -s $pf_flag -r "$PIA_REGION" -o "$WG_CONF_PATH" "$PIA_USERNAME" "$PIA_PASSWORD" >>"$PIA_LOG" 2>&1
+
+  log debug "Running: pia-wg-config -s $pf_flag -r $PIA_REGION -o $WG_CONF_PATH"
+  if pia_output=$("$PIA_WG_CONFIG_BIN" -s $pf_flag -r "$PIA_REGION" -o "$WG_CONF_PATH" "$PIA_USERNAME" "$PIA_PASSWORD" 2>&1); then
+    pia_exit_code=0
+  else
+    pia_exit_code=$?
+  fi
+
+  # Log output to file
+  echo "$pia_output" >> "$PIA_LOG"
+
+  # Log at appropriate level based on exit code
+  if [ "$pia_exit_code" -ne 0 ]; then
+    # Detect specific error: no port-forwarding servers in region
+    if echo "$pia_output" | grep -q "index out of range \[0\] with length 0"; then
+      if [ "$PIA_PORT_FORWARDING" = "true" ]; then
+        log error "No port-forwarding servers available in region '$PIA_REGION'"
+        log info "Try a different region, or set PIA_PORT_FORWARDING=false"
+      else
+        log error "No servers available in region '$PIA_REGION'"
+      fi
+    else
+      log warn "pia-wg-config failed (exit code $pia_exit_code)"
+      if [ -n "$pia_output" ]; then
+        # Log first line of error at warn level, full output at debug
+        first_line=$(echo "$pia_output" | head -n 1)
+        log warn "pia-wg-config error: $first_line"
+      fi
+    fi
+    log debug "pia-wg-config full output: $pia_output"
+  elif [ -n "$pia_output" ]; then
+    log debug "pia-wg-config output: $pia_output"
+  fi
 
   if ! validate_config "$WG_CONF_PATH"; then
     restore_backup
@@ -160,7 +192,7 @@ generate_config() {
   # Extract the server name if present
   server_name=$(grep "^ServerCommonName" "$WG_CONF_PATH" 2>/dev/null | cut -d= -f2 | tr -d ' ' || true)
   if [ -n "$server_name" ]; then
-    log info "Connected to server: $server_name"
+    log info "Config generated for server: $server_name"
   fi
 
   # Add header comment with metadata
@@ -191,17 +223,165 @@ check_connectivity() {
     return 1
   fi
 
-  # Use wget with 10 second timeout to avoid hanging on DNS issues
-  if docker exec "$GLUETUN_CONTAINER" wget -T 10 -qO- "$CHECK_URL" >/dev/null 2>&1; then
+  # Use Gluetun control server API - responds instantly even when VPN is broken
+  public_ip=$(docker exec "$GLUETUN_CONTAINER" wget -qO- --timeout=5 http://localhost:8000/v1/publicip/ip 2>/dev/null | sed -n 's/.*"public_ip":"\([^"]*\)".*/\1/p')
+
+  if [ -n "$public_ip" ]; then
+    log debug "VPN connected with public IP: $public_ip"
     return 0
   fi
 
+  log debug "VPN not connected (no public IP)"
   return 1
 }
 
+# Check port forwarding status via Gluetun control server
+# Returns: 0 = working, 1 = not working
+check_port_forwarding() {
+  if [ "$PIA_PORT_FORWARDING" != "true" ]; then
+    return 0  # Skip check if port forwarding not enabled
+  fi
+
+  port=$(docker exec "$GLUETUN_CONTAINER" wget -qO- --timeout=5 http://localhost:8000/v1/portforward 2>/dev/null | sed -n 's/.*"port":\([0-9]*\).*/\1/p')
+
+  if [ -n "$port" ] && [ "$port" -gt 0 ]; then
+    log debug "Port forwarding active on port: $port"
+    return 0
+  fi
+
+  log debug "Port forwarding not active (port: ${port:-0})"
+  return 1
+}
+
+# Get current server name from wg0.conf
+get_current_server_name() {
+  grep "^ServerCommonName" "$WG_CONF_PATH" 2>/dev/null | cut -d= -f2 | tr -d ' ' || true
+}
+
+# Get SERVER_NAMES from compose env file
+get_env_server_names() {
+  if [ -z "${DOCKER_COMPOSE_HOST_DIR:-}" ]; then
+    return
+  fi
+  env_file="$DOCKER_COMPOSE_HOST_DIR/$DOCKER_COMPOSE_ENV_FILE"
+  if [ -f "$env_file" ]; then
+    grep "^SERVER_NAMES=" "$env_file" 2>/dev/null | cut -d= -f2 || true
+  fi
+}
+
+# Get SERVER_NAMES from running Gluetun container
+get_container_server_names() {
+  docker exec "$GLUETUN_CONTAINER" printenv SERVER_NAMES 2>/dev/null || true
+}
+
+# Update SERVER_NAMES in compose env file (for persistence only)
+# Note: This ensures the .env file matches the current config so future
+# docker compose commands use the correct value. The restart will use
+# the config file directly, so the change takes effect immediately.
+update_env_server_names() {
+  new_server="$1"
+  if [ -z "${DOCKER_COMPOSE_HOST_DIR:-}" ]; then
+    log debug "DOCKER_COMPOSE_HOST_DIR not set - skipping .env update"
+    return 0
+  fi
+
+  env_file="$DOCKER_COMPOSE_HOST_DIR/$DOCKER_COMPOSE_ENV_FILE"
+  if [ ! -f "$env_file" ]; then
+    log debug "Env file not found: $env_file - skipping update"
+    return 0
+  fi
+
+  # Update or add SERVER_NAMES in env file
+  if grep -q "^SERVER_NAMES=" "$env_file"; then
+    sed -i "s/^SERVER_NAMES=.*/SERVER_NAMES=$new_server/" "$env_file"
+  else
+    echo "SERVER_NAMES=$new_server" >> "$env_file"
+  fi
+
+  log debug "Updated SERVER_NAMES=$new_server in $env_file for persistence"
+  return 0
+}
+
+# Get the docker compose project name from container labels
+# This is the most reliable way to determine which project the container belongs to
+get_compose_project() {
+  docker inspect "$GLUETUN_CONTAINER" --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null || true
+}
+
+# Perform docker restart with error handling and logging
+do_docker_restart() {
+  if docker_output=$(docker restart "$GLUETUN_CONTAINER" 2>&1); then
+    echo "$docker_output" >> "$DOCKER_LOG"
+  else
+    echo "$docker_output" >> "$DOCKER_LOG"
+    # Check for common errors and surface them clearly
+    if echo "$docker_output" | grep -qi "no such container"; then
+      log error "Failed to restart container '$GLUETUN_CONTAINER': container not found"
+      log error "Check that GLUETUN_CONTAINER matches your actual container name"
+    elif echo "$docker_output" | grep -qi "permission denied"; then
+      log error "Failed to restart container '$GLUETUN_CONTAINER': permission denied"
+      log error "Check that the Docker socket is mounted correctly"
+    else
+      log error "Failed to restart container '$GLUETUN_CONTAINER'"
+      log debug "Docker error: $docker_output"
+    fi
+  fi
+}
+
+# Recreate or restart Gluetun container and wait for it to come up
+# Uses docker compose up -d if DOCKER_COMPOSE_HOST_DIR is set (picks up env changes),
+# otherwise falls back to docker restart (doesn't update env vars).
+# Project name is auto-detected from container labels.
+# Sets pending_recovery=1 to force short interval checks until fully recovered.
 restart_gluetun() {
-  log warn "Restarting container $GLUETUN_CONTAINER"
-  docker restart "$GLUETUN_CONTAINER" >>"$DOCKER_LOG" 2>&1 || true
+  # Reset confirmation flags so recovery is logged properly
+  tunnel_confirmed=0
+  pf_confirmed=0
+  pending_recovery=1
+
+  if [ -n "${DOCKER_COMPOSE_HOST_DIR:-}" ]; then
+    # Auto-detect project name from container labels
+    project=$(get_compose_project)
+    if [ -n "$project" ]; then
+      log info "Recreating container $GLUETUN_CONTAINER (project: $project)..."
+      if ! docker_output=$(docker compose -p "$project" --project-directory "$DOCKER_COMPOSE_HOST_DIR" up -d --force-recreate "$GLUETUN_CONTAINER" 2>&1); then
+        echo "$docker_output" >> "$DOCKER_LOG"
+        log warn "docker compose up -d failed - falling back to restart"
+        do_docker_restart
+      else
+        echo "$docker_output" >> "$DOCKER_LOG"
+      fi
+    else
+      log warn "Could not detect compose project name - falling back to restart"
+      do_docker_restart
+    fi
+  else
+    log info "Restarting container $GLUETUN_CONTAINER..."
+    do_docker_restart
+  fi
+
+  # Wait for container to come up and verify state
+  log info "Waiting for $GLUETUN_CONTAINER to come up..."
+  sleep 10
+
+  # Check if restart/recreation succeeded
+  if check_connectivity; then
+    log info "Tunnel up"
+    tunnel_confirmed=1
+    if [ "$PIA_PORT_FORWARDING" = "true" ]; then
+      if check_port_forwarding; then
+        log info "Port forwarding active"
+        pf_confirmed=1
+        pending_recovery=0
+      else
+        log debug "Port forwarding not active yet - will retry"
+      fi
+    else
+      pending_recovery=0
+    fi
+  else
+    log warn "Tunnel not up after restart - will retry"
+  fi
 }
 
 download_pia_wg_config || true
@@ -217,12 +397,21 @@ if [ "$SELF_TEST" = "1" ]; then
 fi
 
 failure_count=0
+pf_failure_count=0
 generation_failures=0
 success_count=0
 tunnel_confirmed=0
+pf_confirmed=0
+pending_recovery=0
 first_check=1
 
 log info "Starting refresh loop (interval=${CHECK_INTERVAL_SECONDS}s, healthy_interval=${HEALTHY_CHECK_INTERVAL_SECONDS}s, threshold=$FAIL_THRESHOLD, max_retries=$MAX_GENERATION_RETRIES)"
+if [ "$PIA_PORT_FORWARDING" = "true" ]; then
+  log info "Port forwarding monitoring enabled"
+  if [ -n "${DOCKER_COMPOSE_HOST_DIR:-}" ]; then
+    log info "Compose integration enabled (host_dir=$DOCKER_COMPOSE_HOST_DIR, env=$DOCKER_COMPOSE_ENV_FILE)"
+  fi
+fi
 
 while true; do
   if [ "$first_check" -eq 1 ]; then
@@ -236,6 +425,10 @@ while true; do
     if [ "$tunnel_confirmed" -eq 0 ]; then
       log info "Tunnel up"
       tunnel_confirmed=1
+      # If no port forwarding, recovery is complete
+      if [ "$PIA_PORT_FORWARDING" != "true" ]; then
+        pending_recovery=0
+      fi
     elif [ "$failure_count" -ne 0 ]; then
       log info "Connectivity restored"
     fi
@@ -246,17 +439,65 @@ while true; do
 
     log debug "Connectivity check passed ($success_count)"
 
-    # Periodic health log at info level
-    if [ "$((success_count % HEALTH_LOG_INTERVAL))" -eq 0 ]; then
-      log info "Tunnel healthy (${success_count} consecutive checks)"
+    # Check port forwarding if enabled
+    if [ "$PIA_PORT_FORWARDING" = "true" ]; then
+      if check_port_forwarding; then
+        if [ "$pf_confirmed" -eq 0 ]; then
+          log info "Port forwarding active"
+          pf_confirmed=1
+          pending_recovery=0
+        fi
+        pf_failure_count=0
+      else
+        pf_failure_count=$((pf_failure_count + 1))
+        pf_confirmed=0
+
+        if [ "$pf_failure_count" -ge "$FAIL_THRESHOLD" ]; then
+          log warn "Port forwarding check failed ($pf_failure_count/$FAIL_THRESHOLD)"
+
+          # Check if SERVER_NAMES mismatch between config and container
+          current_server=$(get_current_server_name)
+          container_server=$(get_container_server_names)
+
+          if [ -n "$current_server" ] && [ -n "$container_server" ] && [ "$current_server" != "$container_server" ]; then
+            log info "Syncing SERVER_NAMES: $container_server -> $current_server"
+            # Update .env file and recreate container to apply the change
+            update_env_server_names "$current_server"
+            restart_gluetun
+            pf_failure_count=0
+          else
+            log warn "Port forwarding failed with matching SERVER_NAMES - regenerating config"
+            # Trigger config regeneration by failing connectivity
+            failure_count=$FAIL_THRESHOLD
+            pf_failure_count=0
+          fi
+        else
+          log debug "Port forwarding check failed ($pf_failure_count/$FAIL_THRESHOLD)"
+        fi
+      fi
     fi
 
-    # Use longer interval when healthy
-    sleep "$HEALTHY_CHECK_INTERVAL_SECONDS"
+    # Periodic health log at info level
+    if [ "$((success_count % HEALTH_LOG_INTERVAL))" -eq 0 ]; then
+      if [ "$PIA_PORT_FORWARDING" = "true" ] && [ "$pf_confirmed" -eq 1 ]; then
+        log info "Tunnel healthy with port forwarding (${success_count} consecutive checks)"
+      else
+        log info "Tunnel healthy (${success_count} consecutive checks)"
+      fi
+    fi
+
+    # Use longer interval when healthy (unless PF is failing or pending recovery)
+    if [ "$pf_failure_count" -gt 0 ] || [ "$pending_recovery" -eq 1 ]; then
+      sleep "$CHECK_INTERVAL_SECONDS"
+    else
+      sleep "$HEALTHY_CHECK_INTERVAL_SECONDS"
+    fi
   else
     failure_count=$((failure_count + 1))
     success_count=0
     tunnel_confirmed=0
+    pf_confirmed=0
+    pf_failure_count=0
 
     if [ "$failure_count" -ge "$FAIL_THRESHOLD" ]; then
       log warn "Connectivity check failed ($failure_count/$FAIL_THRESHOLD)"

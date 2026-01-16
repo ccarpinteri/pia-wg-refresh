@@ -13,7 +13,7 @@ RUN git clone https://github.com/Ephemeral-Dust/pia-wg-config.git . \
 
 FROM alpine:3.20
 
-RUN apk add --no-cache ca-certificates docker-cli
+RUN apk add --no-cache ca-certificates docker-cli docker-cli-compose
 
 WORKDIR /app
 
