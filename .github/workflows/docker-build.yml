@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*'
+      - 'dev-*'
 
 env:
   REGISTRY: ghcr.io
@@ -13,7 +14,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       packages: write
 
     steps:
@@ -33,14 +34,16 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=raw,value=latest
+      - name: Set image version and determine tags
+        id: versioning
+        run: |
+          ref="${GITHUB_REF#refs/tags/}"
+          echo "version=$ref" >> "$GITHUB_OUTPUT"
+          if [[ "$ref" == v* ]]; then
+            echo "tags=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$ref,${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest" >> "$GITHUB_OUTPUT"
+          else
+            echo "tags=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$ref" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Build and push
         uses: docker/build-push-action@v5
@@ -48,7 +51,19 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.versioning.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Create GitHub Release (stable only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: pia-wg-refresh ${{ github.ref_name }}
+          body: |
+            Docker image pushed as:
+              - `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}`
+              - `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest`
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

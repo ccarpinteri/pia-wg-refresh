@@ -7,6 +7,28 @@
 **Repository**: This repository
 **Test Environment**: Create a separate test directory alongside the repo
 
+## Branching & Release Strategy
+
+### Branches
+- `main` - Stable, production-ready code
+- `fix/*` - Bug fix branches (e.g., `fix/port-forwarding-regeneration`)
+- `feature/*` - Feature branches (e.g., `feature/hooks`)
+
+### Tags
+- `v*` (e.g., `v0.5.1`) - Stable releases
+  - Triggers Docker build with `:<version>` AND `:latest` tags
+  - Creates GitHub Release
+- `dev-*` (e.g., `dev-fix-pf-regen`) - Dev/test releases
+  - Triggers Docker build with only `:<tag>` tag
+  - No `:latest`, no GitHub Release
+
+### Release Flow
+1. Create branch from `main` (e.g., `fix/port-forwarding-regeneration`)
+2. Make changes and test locally
+3. Push branch, then tag as `dev-<description>` for prod testing
+4. Test on prod server with dev image
+5. If good → merge to `main` → tag as `vX.Y.Z`
+
 ## Key Components
 
 ### Files
