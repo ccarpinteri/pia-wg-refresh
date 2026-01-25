@@ -467,8 +467,15 @@ while true; do
             pf_failure_count=0
           else
             log warn "Port forwarding failed with matching SERVER_NAMES - regenerating config"
-            # Trigger config regeneration by failing connectivity
-            failure_count=$FAIL_THRESHOLD
+            if [ "$generation_failures" -ge "$MAX_GENERATION_RETRIES" ]; then
+              log error "Max generation retries ($MAX_GENERATION_RETRIES) reached, waiting for recovery"
+            elif generate_config; then
+              restart_gluetun
+              generation_failures=0
+            else
+              generation_failures=$((generation_failures + 1))
+              log error "Config generation failed ($generation_failures/$MAX_GENERATION_RETRIES)"
+            fi
             pf_failure_count=0
           fi
         else
