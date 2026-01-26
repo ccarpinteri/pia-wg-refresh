@@ -43,6 +43,8 @@ Optional:
 - `PIA_PORT_FORWARDING` (default: `false`) - enable port forwarding monitoring and server filtering
 - `DOCKER_COMPOSE_HOST_DIR` (optional) - absolute host path to compose directory for automatic `SERVER_NAMES` updates
 - `DOCKER_COMPOSE_ENV_FILE` (default: `.env`) - env file name to update with `SERVER_NAMES`
+- `ON_FAILURE_SCRIPT` (optional) - script to run when failure threshold is reached
+- `ON_RECOVERY_SCRIPT` (optional) - script to run when tunnel recovers
 - `PIA_WG_CONFIG_BIN` (default: `/usr/local/bin/pia-wg-config`)
 - `PIA_WG_CONFIG_URL` (optional: if set, download/replace `pia-wg-config` on startup)
 - `PIA_WG_CONFIG_SHA256` (optional: verify the download before installing)
@@ -85,6 +87,45 @@ Generated config header example:
 # Server: melbourne412 (use this for SERVER_NAMES if port forwarding)
 ```
 
+## Hooks
+
+You can configure scripts to run when failures occur or when the tunnel recovers. Scripts are executed asynchronously (non-blocking) so they don't delay the main monitoring loop.
+
+### Failure hook
+
+Set `ON_FAILURE_SCRIPT` to a script path. The script runs when the failure threshold is reached.
+
+Environment variables passed to the script:
+- `FAILURE_TYPE` - either `connectivity` or `port_forwarding`
+
+### Recovery hook
+
+Set `ON_RECOVERY_SCRIPT` to a script path. The script runs when the tunnel recovers after a failure.
+
+Environment variables passed to the script:
+- `PIA_SERVER_NAME` - the connected PIA server name (e.g., `dublin423`)
+- `PIA_FORWARDED_PORT` - the forwarded port number (if port forwarding is enabled)
+
+### Example
+
+```yaml
+pia-wg-refresh:
+  environment:
+    - ON_FAILURE_SCRIPT=/scripts/notify-failure.sh
+    - ON_RECOVERY_SCRIPT=/scripts/notify-recovery.sh
+  volumes:
+    - ./scripts:/scripts:ro
+```
+
+Example `notify-recovery.sh`:
+```bash
+#!/bin/sh
+curl -X POST "https://your-webhook.com/notify" \
+  -d "VPN recovered on server $PIA_SERVER_NAME with port $PIA_FORWARDED_PORT"
+```
+
+Hook output is logged to `/logs/hooks.log`.
+
 ## Logs
 
 Logs are append-only in `/logs`:
@@ -92,6 +133,7 @@ Logs are append-only in `/logs`:
 - `/logs/refresh.log` - main refresh loop logs (plain text)
 - `/logs/pia-wg-config.log` - output from config generation
 - `/logs/docker.log` - output from docker restart/compose commands
+- `/logs/hooks.log` - output from hook scripts
 
 Console output (`docker logs`) includes colored log levels for easier reading:
 - `[debug]` - cyan

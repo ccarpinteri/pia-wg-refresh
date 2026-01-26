@@ -384,6 +384,56 @@ restart_gluetun() {
   fi
 }
 
+# Run failure hook script asynchronously
+# Args: $1 = failure type (connectivity/port_forwarding)
+run_failure_hook() {
+  if [ -z "${ON_FAILURE_SCRIPT:-}" ]; then
+    return 0
+  fi
+
+  failure_type="$1"
+  log info "Running failure hook (type=$failure_type)"
+
+  # Run script asynchronously with environment variables
+  (
+    export FAILURE_TYPE="$failure_type"
+    if [ -x "$ON_FAILURE_SCRIPT" ]; then
+      "$ON_FAILURE_SCRIPT" >> "$LOG_DIR/hooks.log" 2>&1
+    else
+      /bin/sh "$ON_FAILURE_SCRIPT" >> "$LOG_DIR/hooks.log" 2>&1
+    fi
+  ) &
+}
+
+# Run recovery hook script asynchronously
+run_recovery_hook() {
+  if [ -z "${ON_RECOVERY_SCRIPT:-}" ]; then
+    return 0
+  fi
+
+  # Get current server name from config
+  server_name=$(get_current_server_name)
+
+  # Get forwarded port if port forwarding is enabled
+  forwarded_port=""
+  if [ "$PIA_PORT_FORWARDING" = "true" ]; then
+    forwarded_port=$(docker exec "$GLUETUN_CONTAINER" wget -qO- --timeout=5 http://localhost:8000/v1/portforward 2>/dev/null | sed -n 's/.*"port":\([0-9]*\).*/\1/p' || true)
+  fi
+
+  log info "Running recovery hook (server=$server_name, port=${forwarded_port:-none})"
+
+  # Run script asynchronously with environment variables
+  (
+    export PIA_SERVER_NAME="$server_name"
+    export PIA_FORWARDED_PORT="${forwarded_port:-}"
+    if [ -x "$ON_RECOVERY_SCRIPT" ]; then
+      "$ON_RECOVERY_SCRIPT" >> "$LOG_DIR/hooks.log" 2>&1
+    else
+      /bin/sh "$ON_RECOVERY_SCRIPT" >> "$LOG_DIR/hooks.log" 2>&1
+    fi
+  ) &
+}
+
 download_pia_wg_config || true
 
 if [ ! -x "$PIA_WG_CONFIG_BIN" ]; then
@@ -412,6 +462,9 @@ if [ "$PIA_PORT_FORWARDING" = "true" ]; then
     log info "Compose integration enabled (host_dir=$DOCKER_COMPOSE_HOST_DIR, env=$DOCKER_COMPOSE_ENV_FILE)"
   fi
 fi
+if [ -n "${ON_FAILURE_SCRIPT:-}" ] || [ -n "${ON_RECOVERY_SCRIPT:-}" ]; then
+  log info "Hooks enabled (failure=${ON_FAILURE_SCRIPT:-none}, recovery=${ON_RECOVERY_SCRIPT:-none})"
+fi
 
 while true; do
   if [ "$first_check" -eq 1 ]; then
@@ -427,6 +480,9 @@ while true; do
       tunnel_confirmed=1
       # If no port forwarding, recovery is complete
       if [ "$PIA_PORT_FORWARDING" != "true" ]; then
+        if [ "$pending_recovery" -eq 1 ]; then
+          run_recovery_hook
+        fi
         pending_recovery=0
       fi
     elif [ "$failure_count" -ne 0 ]; then
@@ -445,6 +501,9 @@ while true; do
         if [ "$pf_confirmed" -eq 0 ]; then
           log info "Port forwarding active"
           pf_confirmed=1
+          if [ "$pending_recovery" -eq 1 ]; then
+            run_recovery_hook
+          fi
           pending_recovery=0
         fi
         pf_failure_count=0
@@ -454,6 +513,7 @@ while true; do
 
         if [ "$pf_failure_count" -ge "$FAIL_THRESHOLD" ]; then
           log warn "Port forwarding check failed ($pf_failure_count/$FAIL_THRESHOLD)"
+          run_failure_hook "port_forwarding"
 
           # Check if SERVER_NAMES mismatch between config and container
           current_server=$(get_current_server_name)
@@ -513,6 +573,7 @@ while true; do
     fi
 
     if [ "$failure_count" -ge "$FAIL_THRESHOLD" ]; then
+      run_failure_hook "connectivity"
       if [ "$generation_failures" -ge "$MAX_GENERATION_RETRIES" ]; then
         log error "Max generation retries ($MAX_GENERATION_RETRIES) reached, waiting for connectivity to recover"
       elif generate_config; then
