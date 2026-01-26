@@ -167,20 +167,6 @@ Basic setup:
 
 ```yaml
 services:
-  gluetun:
-    image: qmcgaw/gluetun
-    container_name: gluetun
-    cap_add:
-      - NET_ADMIN
-    devices:
-      - /dev/net/tun:/dev/net/tun
-    volumes:
-      - ./gluetun/config:/gluetun
-    environment:
-      - VPN_SERVICE_PROVIDER=custom
-      - VPN_TYPE=wireguard
-    restart: unless-stopped
-
   pia-wg-refresh:
     image: ghcr.io/ccarpinteri/pia-wg-refresh:latest
     container_name: pia-wg-refresh
@@ -194,12 +180,54 @@ services:
       - ./logs:/logs
       - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped
+    healthcheck:
+      test: grep -q "^Endpoint" /config/wg0.conf || exit 1
+      start_period: 10s
+      interval: 5s
+
+  gluetun:
+    image: qmcgaw/gluetun
+    container_name: gluetun
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    volumes:
+      - ./gluetun/config:/gluetun
+    environment:
+      - VPN_SERVICE_PROVIDER=custom
+      - VPN_TYPE=wireguard
+    restart: unless-stopped
+    depends_on:
+      pia-wg-refresh:
+        condition: service_healthy
 ```
 
 With automatic port forwarding:
 
 ```yaml
 services:
+  pia-wg-refresh:
+    image: ghcr.io/ccarpinteri/pia-wg-refresh:latest
+    container_name: pia-wg-refresh
+    environment:
+      - PIA_USERNAME=${PIA_USERNAME}
+      - PIA_PASSWORD=${PIA_PASSWORD}
+      - PIA_REGION=${PIA_REGION}
+      - PIA_PORT_FORWARDING=true
+      - DOCKER_COMPOSE_HOST_DIR=/path/to/your/compose/directory
+      - GLUETUN_CONTAINER=gluetun
+    volumes:
+      - ./gluetun/config/wireguard:/config
+      - ./logs:/logs
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /path/to/your/compose/directory:/path/to/your/compose/directory
+    restart: unless-stopped
+    healthcheck:
+      test: grep -q "^Endpoint" /config/wg0.conf || exit 1
+      start_period: 10s
+      interval: 5s
+
   gluetun:
     image: qmcgaw/gluetun
     container_name: gluetun
@@ -218,23 +246,9 @@ services:
       - VPN_PORT_FORWARDING_PASSWORD=${PIA_PASSWORD}
       - SERVER_NAMES=${SERVER_NAMES}
     restart: unless-stopped
-
-  pia-wg-refresh:
-    image: ghcr.io/ccarpinteri/pia-wg-refresh:latest
-    container_name: pia-wg-refresh
-    environment:
-      - PIA_USERNAME=${PIA_USERNAME}
-      - PIA_PASSWORD=${PIA_PASSWORD}
-      - PIA_REGION=${PIA_REGION}
-      - PIA_PORT_FORWARDING=true
-      - DOCKER_COMPOSE_HOST_DIR=/path/to/your/compose/directory
-      - GLUETUN_CONTAINER=gluetun
-    volumes:
-      - ./gluetun/config/wireguard:/config
-      - ./logs:/logs
-      - /var/run/docker.sock:/var/run/docker.sock
-      - /path/to/your/compose/directory:/path/to/your/compose/directory
-    restart: unless-stopped
+    depends_on:
+      pia-wg-refresh:
+        condition: service_healthy
 ```
 
 Replace `/path/to/your/compose/directory` with the absolute path where your `docker-compose.yml` and `.env` files are located (e.g., `/home/user/docker/gluetun`).

@@ -1,6 +1,6 @@
 services:
   pia-wg-refresh:
-    image: ccarpinteri/pia-wg-refresh:latest
+    image: ghcr.io/ccarpinteri/pia-wg-refresh:latest
     container_name: pia-wg-refresh
     environment:
       # Required: PIA credentials and region.
@@ -25,8 +25,26 @@ services:
       # Docker socket for docker exec/restart.
       - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped
+    # Healthcheck validates config exists - used by gluetun depends_on
     healthcheck:
-      test: ["CMD-SHELL", "ps | grep -q '[r]efresh-loop.sh'"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
+      test: grep -q "^Endpoint" /config/wg0.conf || exit 1
+      start_period: 10s
+      interval: 5s
+
+  gluetun:
+    image: qmcgaw/gluetun
+    container_name: gluetun
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    volumes:
+      - ${DOCKER_PATH}/gluetun/config:/gluetun
+    environment:
+      - VPN_SERVICE_PROVIDER=custom
+      - VPN_TYPE=wireguard
+    restart: unless-stopped
+    # Wait for pia-wg-refresh to generate a valid config before starting
+    depends_on:
+      pia-wg-refresh:
+        condition: service_healthy
