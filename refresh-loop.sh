@@ -129,6 +129,11 @@ validate_config() {
     log error "Generated config missing [Peer] section"
     return 1
   fi
+  # Validate Endpoint exists - Gluetun requires this
+  if ! grep -q "^Endpoint" "$path"; then
+    log error "Generated config missing Endpoint (required by Gluetun)"
+    return 1
+  fi
   return 0
 }
 
@@ -460,6 +465,17 @@ if [ "$PIA_PORT_FORWARDING" = "true" ]; then
 fi
 if [ -n "${ON_FAILURE_SCRIPT:-}" ] || [ -n "${ON_RECOVERY_SCRIPT:-}" ]; then
   log info "Hooks enabled (failure=${ON_FAILURE_SCRIPT:-none}, recovery=${ON_RECOVERY_SCRIPT:-none})"
+fi
+
+# Generate initial config if missing or invalid
+# This prevents Gluetun from failing on fresh setups where no wg0.conf exists
+if [ ! -f "$WG_CONF_PATH" ] || ! validate_config "$WG_CONF_PATH"; then
+  log info "No valid config found at $WG_CONF_PATH, generating initial config..."
+  if generate_config; then
+    log info "Initial config generated successfully"
+  else
+    log warn "Failed to generate initial config - will retry in monitoring loop"
+  fi
 fi
 
 while true; do
