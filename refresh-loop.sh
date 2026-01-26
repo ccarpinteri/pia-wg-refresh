@@ -386,6 +386,7 @@ restart_gluetun() {
 
 # Run failure hook script asynchronously
 # Args: $1 = failure type (connectivity/port_forwarding)
+# Supports arguments in ON_FAILURE_SCRIPT (e.g., "/scripts/notify.sh failure")
 run_failure_hook() {
   if [ -z "${ON_FAILURE_SCRIPT:-}" ]; then
     return 0
@@ -395,17 +396,15 @@ run_failure_hook() {
   log info "Running failure hook (type=$failure_type)"
 
   # Run script asynchronously with environment variables
+  # Using eval to support script arguments
   (
     export FAILURE_TYPE="$failure_type"
-    if [ -x "$ON_FAILURE_SCRIPT" ]; then
-      "$ON_FAILURE_SCRIPT" >> "$LOG_DIR/hooks.log" 2>&1
-    else
-      /bin/sh "$ON_FAILURE_SCRIPT" >> "$LOG_DIR/hooks.log" 2>&1
-    fi
+    eval "$ON_FAILURE_SCRIPT" >> "$LOG_DIR/hooks.log" 2>&1
   ) &
 }
 
 # Run recovery hook script asynchronously
+# Supports arguments in ON_RECOVERY_SCRIPT (e.g., "/scripts/notify.sh recover")
 run_recovery_hook() {
   if [ -z "${ON_RECOVERY_SCRIPT:-}" ]; then
     return 0
@@ -423,14 +422,11 @@ run_recovery_hook() {
   log info "Running recovery hook (server=$server_name, port=${forwarded_port:-none})"
 
   # Run script asynchronously with environment variables
+  # Using eval to support script arguments
   (
     export PIA_SERVER_NAME="$server_name"
     export PIA_FORWARDED_PORT="${forwarded_port:-}"
-    if [ -x "$ON_RECOVERY_SCRIPT" ]; then
-      "$ON_RECOVERY_SCRIPT" >> "$LOG_DIR/hooks.log" 2>&1
-    else
-      /bin/sh "$ON_RECOVERY_SCRIPT" >> "$LOG_DIR/hooks.log" 2>&1
-    fi
+    eval "$ON_RECOVERY_SCRIPT" >> "$LOG_DIR/hooks.log" 2>&1
   ) &
 }
 

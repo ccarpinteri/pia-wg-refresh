@@ -91,9 +91,11 @@ Generated config header example:
 
 You can configure scripts to run when failures occur or when the tunnel recovers. Scripts are executed asynchronously (non-blocking) so they don't delay the main monitoring loop.
 
+Script paths can include arguments (e.g., `/scripts/notify.sh failure`).
+
 ### Failure hook
 
-Set `ON_FAILURE_SCRIPT` to a script path. The script runs when the failure threshold is reached.
+Set `ON_FAILURE_SCRIPT` to a script path (with optional arguments). The script runs when the failure threshold is reached.
 
 Environment variables passed to the script:
 - `FAILURE_TYPE` - either `connectivity` or `port_forwarding`
@@ -108,6 +110,7 @@ Environment variables passed to the script:
 
 ### Example
 
+Using separate scripts:
 ```yaml
 pia-wg-refresh:
   environment:
@@ -117,11 +120,26 @@ pia-wg-refresh:
     - ./scripts:/scripts:ro
 ```
 
-Example `notify-recovery.sh`:
+Using a single script with arguments:
+```yaml
+pia-wg-refresh:
+  environment:
+    - ON_FAILURE_SCRIPT=/scripts/notify.sh failure
+    - ON_RECOVERY_SCRIPT=/scripts/notify.sh recover
+  volumes:
+    - ./scripts:/scripts:ro
+```
+
+Example `notify.sh`:
 ```bash
 #!/bin/sh
-curl -X POST "https://your-webhook.com/notify" \
-  -d "VPN recovered on server $PIA_SERVER_NAME with port $PIA_FORWARDED_PORT"
+ACTION="$1"
+if [ "$ACTION" = "failure" ]; then
+  curl -X POST "https://your-webhook.com/notify" -d "VPN failure: $FAILURE_TYPE"
+elif [ "$ACTION" = "recover" ]; then
+  curl -X POST "https://your-webhook.com/notify" \
+    -d "VPN recovered on server $PIA_SERVER_NAME with port $PIA_FORWARDED_PORT"
+fi
 ```
 
 Hook output is logged to `/logs/hooks.log`.
