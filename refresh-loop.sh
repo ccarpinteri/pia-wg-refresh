@@ -185,6 +185,8 @@ generate_config() {
       fi
     fi
     log debug "pia-wg-config full output: $pia_output"
+    restore_backup
+    return 1
   elif [ -n "$pia_output" ]; then
     log debug "pia-wg-config output: $pia_output"
   fi
