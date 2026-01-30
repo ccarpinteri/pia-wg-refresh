@@ -29,6 +29,26 @@
 4. Test on prod server with dev image
 5. If good → merge to `main` → tag as `vX.Y.Z`
 
+### Hotfix Workflow
+
+When a bug fix is needed while feature work is in progress:
+
+1. **Always branch from `main`** for hotfixes, never from a feature branch
+2. Create `fix/<description>` branch from `main`
+3. Make the fix, test, merge to `main`, tag release
+4. Rebase feature branches onto updated `main` if needed
+
+**Never merge a feature branch to release a hotfix.** If you've accidentally committed a fix to a feature branch:
+- Cherry-pick the fix commits to a new branch from `main`
+- Or reset and redo the work on the correct branch
+
+### Pre-Release Checklist
+
+Before tagging a release:
+1. `git log main..<branch> --oneline` - review ALL commits being merged
+2. Confirm only intended changes are included
+3. If feature work is mixed in, stop and separate
+
 ## Key Components
 
 ### Files
