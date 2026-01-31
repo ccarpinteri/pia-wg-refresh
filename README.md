@@ -198,9 +198,6 @@ services:
       - VPN_SERVICE_PROVIDER=custom
       - VPN_TYPE=wireguard
     restart: unless-stopped
-    depends_on:
-      pia-wg-refresh:
-        condition: service_healthy
 ```
 
 With automatic port forwarding:
@@ -246,9 +243,6 @@ services:
       - VPN_PORT_FORWARDING_PASSWORD=${PIA_PASSWORD}
       - SERVER_NAMES=${SERVER_NAMES}
     restart: unless-stopped
-    depends_on:
-      pia-wg-refresh:
-        condition: service_healthy
 ```
 
 Replace `/path/to/your/compose/directory` with the absolute path where your `docker-compose.yml` and `.env` files are located (e.g., `/home/user/docker/gluetun`).

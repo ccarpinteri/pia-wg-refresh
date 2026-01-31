@@ -347,28 +347,65 @@ restart_gluetun() {
   pending_recovery=1
 
   if [ -n "${DOCKER_COMPOSE_HOST_DIR:-}" ]; then
-    # Auto-detect project name from container labels
+    # Auto-detect project name from container labels (if container exists)
     project=$(get_compose_project)
     if [ -n "$project" ]; then
-      compose_cmd="docker compose -p \"$project\" --project-directory \"$DOCKER_COMPOSE_HOST_DIR\" up -d --force-recreate \"$GLUETUN_CONTAINER\""
       log info "Recreating container $GLUETUN_CONTAINER (project: $project)..."
-      log debug "Running compose command: $compose_cmd"
 
-      if ! docker_output=$(docker compose -p "$project" --project-directory "$DOCKER_COMPOSE_HOST_DIR" up -d --force-recreate "$GLUETUN_CONTAINER" 2>&1); then
+      # Use raw docker commands to avoid docker compose dependency issues
+      # (gluetun's depends_on pia-wg-refresh causes compose to recreate wrong container)
+      log debug "Stopping container: $GLUETUN_CONTAINER"
+      if docker_output=$(docker stop "$GLUETUN_CONTAINER" 2>&1); then
+        echo "$docker_output" >> "$DOCKER_LOG"
+        log debug "Container stopped"
+      else
+        echo "$docker_output" >> "$DOCKER_LOG"
+        log debug "Stop failed (container may not be running): $docker_output"
+      fi
+
+      log debug "Removing container: $GLUETUN_CONTAINER"
+      if docker_output=$(docker rm "$GLUETUN_CONTAINER" 2>&1); then
+        echo "$docker_output" >> "$DOCKER_LOG"
+        log debug "Container removed"
+      else
+        echo "$docker_output" >> "$DOCKER_LOG"
+        log debug "Remove failed (container may not exist): $docker_output"
+      fi
+
+      # Recreate using docker compose (reads updated .env file)
+      log debug "Running: docker compose -p \"$project\" --project-directory \"$DOCKER_COMPOSE_HOST_DIR\" up -d \"$GLUETUN_CONTAINER\""
+      if ! docker_output=$(docker compose -p "$project" --project-directory "$DOCKER_COMPOSE_HOST_DIR" up -d "$GLUETUN_CONTAINER" 2>&1); then
         compose_exit_code=$?
         echo "$docker_output" >> "$DOCKER_LOG"
-        log warn "docker compose up -d failed (exit code: $compose_exit_code)"
+        log error "docker compose up -d failed (exit code: $compose_exit_code)"
         log debug "Compose output: $docker_output"
-        log warn "Falling back to docker restart"
-        do_docker_restart
+        return 1
       else
         echo "$docker_output" >> "$DOCKER_LOG"
         log debug "Compose output: $docker_output"
-        log info "Container recreation command completed successfully"
+        log info "Container recreation completed successfully"
       fi
     else
-      log warn "Could not detect compose project name - falling back to restart"
-      do_docker_restart
+      log warn "Could not detect compose project name - container may not exist yet"
+      log info "Attempting to start $GLUETUN_CONTAINER via compose..."
+
+      # If we can't detect project, try using compose without project name
+      # This happens on fresh installs where gluetun hasn't started yet
+      if [ -f "$DOCKER_COMPOSE_HOST_DIR/docker-compose.yml" ]; then
+        if ! docker_output=$(docker compose --project-directory "$DOCKER_COMPOSE_HOST_DIR" up -d "$GLUETUN_CONTAINER" 2>&1); then
+          echo "$docker_output" >> "$DOCKER_LOG"
+          log error "Failed to start $GLUETUN_CONTAINER via compose"
+          log debug "Compose output: $docker_output"
+          return 1
+        else
+          echo "$docker_output" >> "$DOCKER_LOG"
+          log debug "Compose output: $docker_output"
+          log info "Container started successfully"
+        fi
+      else
+        log error "Cannot find docker-compose.yml at $DOCKER_COMPOSE_HOST_DIR"
+        return 1
+      fi
     fi
   else
     log info "Restarting container $GLUETUN_CONTAINER..."

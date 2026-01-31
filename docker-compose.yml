@@ -25,7 +25,7 @@ services:
       # Docker socket for docker exec/restart.
       - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped
-    # Healthcheck validates config exists - used by gluetun depends_on
+    # Healthcheck validates config exists and is valid
     healthcheck:
       test: grep -q "^Endpoint" /config/wg0.conf || exit 1
       start_period: 10s
@@ -44,7 +44,4 @@ services:
       - VPN_SERVICE_PROVIDER=custom
       - VPN_TYPE=wireguard
     restart: unless-stopped
-    # Wait for pia-wg-refresh to generate a valid config before starting
-    depends_on:
-      pia-wg-refresh:
-        condition: service_healthy
+    # No depends_on needed - pia-wg-refresh will recreate gluetun if config is missing/invalid
