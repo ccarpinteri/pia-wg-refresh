@@ -350,13 +350,21 @@ restart_gluetun() {
     # Auto-detect project name from container labels
     project=$(get_compose_project)
     if [ -n "$project" ]; then
+      compose_cmd="docker compose -p \"$project\" --project-directory \"$DOCKER_COMPOSE_HOST_DIR\" up -d --force-recreate \"$GLUETUN_CONTAINER\""
       log info "Recreating container $GLUETUN_CONTAINER (project: $project)..."
+      log debug "Running compose command: $compose_cmd"
+
       if ! docker_output=$(docker compose -p "$project" --project-directory "$DOCKER_COMPOSE_HOST_DIR" up -d --force-recreate "$GLUETUN_CONTAINER" 2>&1); then
+        compose_exit_code=$?
         echo "$docker_output" >> "$DOCKER_LOG"
-        log warn "docker compose up -d failed - falling back to restart"
+        log warn "docker compose up -d failed (exit code: $compose_exit_code)"
+        log debug "Compose output: $docker_output"
+        log warn "Falling back to docker restart"
         do_docker_restart
       else
         echo "$docker_output" >> "$DOCKER_LOG"
+        log debug "Compose output: $docker_output"
+        log info "Container recreation command completed successfully"
       fi
     else
       log warn "Could not detect compose project name - falling back to restart"
@@ -370,6 +378,22 @@ restart_gluetun() {
   # Wait for container to come up and verify state
   log info "Waiting for $GLUETUN_CONTAINER to come up..."
   sleep 10
+
+  # Verify container is actually running
+  if ! docker inspect "$GLUETUN_CONTAINER" >/dev/null 2>&1; then
+    log error "Container $GLUETUN_CONTAINER does not exist after recreation attempt"
+    return 1
+  fi
+
+  container_state=$(docker inspect -f '{{.State.Status}}' "$GLUETUN_CONTAINER" 2>/dev/null)
+  log debug "Container state after recreation: $container_state"
+
+  if [ "$container_state" != "running" ]; then
+    log error "Container $GLUETUN_CONTAINER is not running (state: $container_state)"
+    # Get the last few log lines to see why it failed
+    log debug "Container logs: $(docker logs "$GLUETUN_CONTAINER" --tail 10 2>&1 | tr '\n' ' ')"
+    return 1
+  fi
 
   # Check if restart/recreation succeeded
   if check_connectivity; then
