@@ -440,11 +440,13 @@ restart_gluetun() {
       if check_port_forwarding; then
         log info "Port forwarding active"
         pf_confirmed=1
+        run_recovery_hook
         pending_recovery=0
       else
         log debug "Port forwarding not active yet - will retry"
       fi
     else
+      run_recovery_hook
       pending_recovery=0
     fi
   else
