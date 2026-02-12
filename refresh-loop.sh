@@ -510,6 +510,11 @@ restart_gluetun() {
     tunnel_confirmed=1
     if [ "$PIA_PORT_FORWARDING" = "true" ]; then
       if check_port_forwarding; then
+        # Check for port change during recovery
+        if [ -n "$current_forwarded_port" ] && [ "$current_forwarded_port" != "$last_forwarded_port" ]; then
+          run_port_change_hook "$current_forwarded_port" "$last_forwarded_port"
+          last_forwarded_port="$current_forwarded_port"
+        fi
         log info "Port forwarding active"
         pf_confirmed=1
         run_recovery_hook
