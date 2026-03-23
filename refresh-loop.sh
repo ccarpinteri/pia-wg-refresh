@@ -231,7 +231,7 @@ check_connectivity() {
   fi
 
   # Use Gluetun control server API - responds instantly even when VPN is broken
-  public_ip=$(docker exec "$GLUETUN_CONTAINER" wget -qO- --timeout=5 http://localhost:8000/v1/publicip/ip 2>/dev/null | sed -n 's/.*"public_ip":"\([^"]*\)".*/\1/p')
+  public_ip=$(docker exec "$GLUETUN_CONTAINER" wget -qO- --timeout=5 http://localhost:${GLUETUN_CONTROL_SERVER_PORT:-8000}/v1/publicip/ip 2>/dev/null | sed -n 's/.*"public_ip":"\([^"]*\)".*/\1/p')
 
   if [ -n "$public_ip" ]; then
     log debug "VPN connected with public IP: $public_ip"
@@ -252,7 +252,7 @@ check_port_forwarding() {
     return 0  # Skip check if port forwarding not enabled
   fi
 
-  port=$(docker exec "$GLUETUN_CONTAINER" wget -qO- --timeout=5 http://localhost:8000/v1/portforward 2>/dev/null | sed -n 's/.*"port":\([0-9]*\).*/\1/p')
+  port=$(docker exec "$GLUETUN_CONTAINER" wget -qO- --timeout=5 http://localhost:${GLUETUN_CONTROL_SERVER_PORT:-8000}/v1/portforward 2>/dev/null | sed -n 's/.*"port":\([0-9]*\).*/\1/p')
 
   if [ -n "$port" ] && [ "$port" -gt 0 ]; then
     current_forwarded_port="$port"
@@ -570,7 +570,7 @@ run_recovery_hook() {
   # Get forwarded port if port forwarding is enabled
   forwarded_port=""
   if [ "$PIA_PORT_FORWARDING" = "true" ]; then
-    forwarded_port=$(docker exec "$GLUETUN_CONTAINER" wget -qO- --timeout=5 http://localhost:8000/v1/portforward 2>/dev/null | sed -n 's/.*"port":\([0-9]*\).*/\1/p' || true)
+    forwarded_port=$(docker exec "$GLUETUN_CONTAINER" wget -qO- --timeout=5 http://localhost:${GLUETUN_CONTROL_SERVER_PORT:-8000}/v1/portforward 2>/dev/null | sed -n 's/.*"port":\([0-9]*\).*/\1/p' || true)
   fi
 
   log info "Running recovery hook (server=$server_name, port=${forwarded_port:-none})"
