@@ -231,7 +231,7 @@ check_connectivity() {
   fi
 
   # Use Gluetun control server API - responds instantly even when VPN is broken
-  public_ip=$(docker exec "$GLUETUN_CONTAINER" wget -qO- --timeout=5 http://localhost:8000/v1/publicip/ip 2>/dev/null | sed -n 's/.*"public_ip":"\([^"]*\)".*/\1/p')
+  public_ip=$(docker exec "$GLUETUN_CONTAINER" wget -qO- --timeout=5 http://localhost:${GLUETUN_CONTROL_SERVER_PORT:-8000}/v1/publicip/ip 2>/dev/null | sed -n 's/.*"public_ip":"\([^"]*\)".*/\1/p')
 
   if [ -n "$public_ip" ]; then
     log debug "VPN connected with public IP: $public_ip"
@@ -244,14 +244,18 @@ check_connectivity() {
 
 # Check port forwarding status via Gluetun control server
 # Returns: 0 = working, 1 = not working
+# Sets global: current_forwarded_port (for port change detection)
 check_port_forwarding() {
+  current_forwarded_port=""
+
   if [ "$PIA_PORT_FORWARDING" != "true" ]; then
     return 0  # Skip check if port forwarding not enabled
   fi
 
-  port=$(docker exec "$GLUETUN_CONTAINER" wget -qO- --timeout=5 http://localhost:8000/v1/portforward 2>/dev/null | sed -n 's/.*"port":\([0-9]*\).*/\1/p')
+  port=$(docker exec "$GLUETUN_CONTAINER" wget -qO- --timeout=5 http://localhost:${GLUETUN_CONTROL_SERVER_PORT:-8000}/v1/portforward 2>/dev/null | sed -n 's/.*"port":\([0-9]*\).*/\1/p')
 
   if [ -n "$port" ] && [ "$port" -gt 0 ]; then
+    current_forwarded_port="$port"
     log debug "Port forwarding active on port: $port"
     return 0
   fi
@@ -506,6 +510,11 @@ restart_gluetun() {
     tunnel_confirmed=1
     if [ "$PIA_PORT_FORWARDING" = "true" ]; then
       if check_port_forwarding; then
+        # Check for port change during recovery
+        if [ -n "$current_forwarded_port" ] && [ "$current_forwarded_port" != "$last_forwarded_port" ]; then
+          run_port_change_hook "$current_forwarded_port" "$last_forwarded_port"
+          last_forwarded_port="$current_forwarded_port"
+        fi
         log info "Port forwarding active"
         pf_confirmed=1
         run_recovery_hook
@@ -561,7 +570,7 @@ run_recovery_hook() {
   # Get forwarded port if port forwarding is enabled
   forwarded_port=""
   if [ "$PIA_PORT_FORWARDING" = "true" ]; then
-    forwarded_port=$(docker exec "$GLUETUN_CONTAINER" wget -qO- --timeout=5 http://localhost:8000/v1/portforward 2>/dev/null | sed -n 's/.*"port":\([0-9]*\).*/\1/p' || true)
+    forwarded_port=$(docker exec "$GLUETUN_CONTAINER" wget -qO- --timeout=5 http://localhost:${GLUETUN_CONTROL_SERVER_PORT:-8000}/v1/portforward 2>/dev/null | sed -n 's/.*"port":\([0-9]*\).*/\1/p' || true)
   fi
 
   log info "Running recovery hook (server=$server_name, port=${forwarded_port:-none})"
@@ -575,6 +584,39 @@ run_recovery_hook() {
     export PIA_FORWARDED_PORT="${forwarded_port:-}"
     log debug "Hook output will be in $LOG_DIR/hooks.log"
     eval "$ON_RECOVERY_SCRIPT" >> "$LOG_DIR/hooks.log" 2>&1
+    hook_exit=$?
+    if [ $hook_exit -ne 0 ]; then
+      echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Hook exited with code $hook_exit" >> "$LOG_DIR/hooks.log"
+    fi
+  ) &
+}
+
+# Run port change hook script asynchronously
+# Args: $1 = new port, $2 = previous port (may be empty on initial discovery)
+run_port_change_hook() {
+  if [ -z "${ON_PORT_CHANGE_SCRIPT:-}" ]; then
+    return 0
+  fi
+
+  new_port="$1"
+  previous_port="${2:-}"
+  server_name=$(get_current_server_name)
+
+  if [ -z "$previous_port" ]; then
+    log info "Running port change hook (port=$new_port, initial discovery)"
+  else
+    log info "Running port change hook (port=$new_port, previous=$previous_port)"
+  fi
+  log debug "Executing: $ON_PORT_CHANGE_SCRIPT"
+  log debug "Environment: PIA_FORWARDED_PORT=$new_port, PIA_PREVIOUS_PORT=${previous_port:-none}, PIA_SERVER_NAME=$server_name"
+
+  # Run script asynchronously with environment variables
+  (
+    export PIA_FORWARDED_PORT="$new_port"
+    export PIA_PREVIOUS_PORT="${previous_port:-}"
+    export PIA_SERVER_NAME="$server_name"
+    log debug "Hook output will be in $LOG_DIR/hooks.log"
+    eval "$ON_PORT_CHANGE_SCRIPT" >> "$LOG_DIR/hooks.log" 2>&1
     hook_exit=$?
     if [ $hook_exit -ne 0 ]; then
       echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Hook exited with code $hook_exit" >> "$LOG_DIR/hooks.log"
@@ -602,6 +644,7 @@ tunnel_confirmed=0
 pf_confirmed=0
 pending_recovery=0
 first_check=1
+last_forwarded_port=""
 
 log info "Starting refresh loop (interval=${CHECK_INTERVAL_SECONDS}s, healthy_interval=${HEALTHY_CHECK_INTERVAL_SECONDS}s, threshold=$FAIL_THRESHOLD, max_retries=$MAX_GENERATION_RETRIES)"
 if [ "$PIA_PORT_FORWARDING" = "true" ]; then
@@ -610,8 +653,8 @@ if [ "$PIA_PORT_FORWARDING" = "true" ]; then
     log info "Compose integration enabled (host_dir=$DOCKER_COMPOSE_HOST_DIR, env=$DOCKER_COMPOSE_ENV_FILE)"
   fi
 fi
-if [ -n "${ON_FAILURE_SCRIPT:-}" ] || [ -n "${ON_RECOVERY_SCRIPT:-}" ]; then
-  log info "Hooks enabled (failure=${ON_FAILURE_SCRIPT:-none}, recovery=${ON_RECOVERY_SCRIPT:-none})"
+if [ -n "${ON_FAILURE_SCRIPT:-}" ] || [ -n "${ON_RECOVERY_SCRIPT:-}" ] || [ -n "${ON_PORT_CHANGE_SCRIPT:-}" ]; then
+  log info "Hooks enabled (failure=${ON_FAILURE_SCRIPT:-none}, recovery=${ON_RECOVERY_SCRIPT:-none}, port_change=${ON_PORT_CHANGE_SCRIPT:-none})"
 fi
 
 # Generate initial config if missing or invalid
@@ -657,6 +700,12 @@ while true; do
     # Check port forwarding if enabled
     if [ "$PIA_PORT_FORWARDING" = "true" ]; then
       if check_port_forwarding; then
+        # Check for port change (including initial discovery)
+        if [ -n "$current_forwarded_port" ] && [ "$current_forwarded_port" != "$last_forwarded_port" ]; then
+          run_port_change_hook "$current_forwarded_port" "$last_forwarded_port"
+          last_forwarded_port="$current_forwarded_port"
+        fi
+
         if [ "$pf_confirmed" -eq 0 ]; then
           log info "Port forwarding active"
           pf_confirmed=1
