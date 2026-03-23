@@ -45,6 +45,7 @@ Optional:
 - `DOCKER_COMPOSE_ENV_FILE` (default: `.env`) - env file name to update with `SERVER_NAMES`
 - `ON_FAILURE_SCRIPT` (optional) - script to run when failure threshold is reached
 - `ON_RECOVERY_SCRIPT` (optional) - script to run when tunnel recovers
+- `ON_PORT_CHANGE_SCRIPT` (optional) - script to run when the forwarded port changes
 - `PIA_WG_CONFIG_BIN` (default: `/usr/local/bin/pia-wg-config`)
 - `PIA_WG_CONFIG_URL` (optional: if set, download/replace `pia-wg-config` on startup)
 - `PIA_WG_CONFIG_SHA256` (optional: verify the download before installing)
@@ -108,6 +109,15 @@ Environment variables passed to the script:
 - `PIA_SERVER_NAME` - the connected PIA server name (e.g., `dublin423`)
 - `PIA_FORWARDED_PORT` - the forwarded port number (if port forwarding is enabled)
 
+### Port change hook
+
+Set `ON_PORT_CHANGE_SCRIPT` to a script path. The script runs whenever the forwarded port changes, including on first discovery after startup.
+
+Environment variables passed to the script:
+- `PIA_FORWARDED_PORT` - the new forwarded port number
+- `PIA_PREVIOUS_PORT` - the previous port number (empty string on first discovery)
+- `PIA_SERVER_NAME` - the connected PIA server name
+
 ### Example
 
 Using separate scripts:
@@ -116,6 +126,7 @@ pia-wg-refresh:
   environment:
     - ON_FAILURE_SCRIPT=/scripts/notify-failure.sh
     - ON_RECOVERY_SCRIPT=/scripts/notify-recovery.sh
+    - ON_PORT_CHANGE_SCRIPT=/scripts/notify-ports.sh
   volumes:
     - ./scripts:/scripts:ro
 ```
@@ -126,6 +137,7 @@ pia-wg-refresh:
   environment:
     - ON_FAILURE_SCRIPT=/scripts/notify.sh failure
     - ON_RECOVERY_SCRIPT=/scripts/notify.sh recover
+    - ON_PORT_CHANGE_SCRIPT=/scripts/notify.sh ports
   volumes:
     - ./scripts:/scripts:ro
 ```
@@ -139,8 +151,13 @@ if [ "$ACTION" = "failure" ]; then
 elif [ "$ACTION" = "recover" ]; then
   curl -X POST "https://your-webhook.com/notify" \
     -d "VPN recovered on server $PIA_SERVER_NAME with port $PIA_FORWARDED_PORT"
+elif [ "$ACTION" = "ports" ]; then
+  curl -X POST "https://your-webhook.com/notify" \
+    -d "Port changed: $PIA_PREVIOUS_PORT -> $PIA_FORWARDED_PORT (server: $PIA_SERVER_NAME)"
 fi
 ```
+
+A working Prowl notification example covering all three hook types is available in [`scripts/pia-wg-refresh-notification.sh`](scripts/pia-wg-refresh-notification.sh).
 
 **Important**: Hook scripts must use `#!/bin/sh` as the shebang. The container uses Alpine Linux which doesn't include bash. If your script requires bash-specific features, you'll need to modify the Dockerfile to install bash.
 
@@ -188,7 +205,9 @@ services:
       interval: 5s
 
   gluetun:
-    image: qmcgaw/gluetun
+    # Pin to a specific version - gluetun:latest tracks HEAD and can ship regressions.
+    # Check https://github.com/qdm12/gluetun/releases for the latest stable release.
+    image: qmcgaw/gluetun:v3.41.1
     container_name: gluetun
     cap_add:
       - NET_ADMIN
@@ -228,7 +247,9 @@ services:
       interval: 5s
 
   gluetun:
-    image: qmcgaw/gluetun
+    # Pin to a specific version - gluetun:latest tracks HEAD and can ship regressions.
+    # Check https://github.com/qdm12/gluetun/releases for the latest stable release.
+    image: qmcgaw/gluetun:v3.41.1
     container_name: gluetun
     cap_add:
       - NET_ADMIN
@@ -248,6 +269,27 @@ services:
 ```
 
 Replace `/path/to/your/compose/directory` with the absolute path where your `docker-compose.yml` and `.env` files are located (e.g., `/home/user/docker/gluetun`).
+
+## Gluetun compatibility
+
+Gluetun v3.39.1 and later make all control server API routes private by default. pia-wg-refresh uses two endpoints (`/v1/publicip/ip` and `/v1/portforward`) to check VPN and port forwarding status. Without configuration these return `401` and pia-wg-refresh will incorrectly treat the VPN as down.
+
+To fix this, create `auth/config.toml` inside the directory you mount to `/gluetun` in the container (e.g. `./gluetun/config/auth/config.toml`):
+
+```toml
+[[roles]]
+name = "pia-wg-refresh"
+routes = ["GET /v1/publicip/ip", "GET /v1/portforward"]
+auth = "none"
+```
+
+This opens only the two read-only endpoints pia-wg-refresh needs. All other routes — including `/v1/vpn/settings` which exposes VPN credentials — remain protected.
+
+If you are running an older version of Gluetun (pre-v3.39.1), no action is needed.
+
+### Version pinning
+
+`qmcgaw/gluetun:latest` tracks the development branch and can ship regressions before they hit a stable release. It is strongly recommended to pin to a specific version tag (e.g. `qmcgaw/gluetun:v3.41.1`) and update deliberately. Check the [Gluetun releases page](https://github.com/qdm12/gluetun/releases) for the latest stable release. If you use an auto-update tool (e.g. Watchtower, Synology Container Manager), exclude gluetun from automatic updates.
 
 ## Security notes
 

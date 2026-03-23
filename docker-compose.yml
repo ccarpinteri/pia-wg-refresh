@@ -14,6 +14,10 @@ services:
       # - CHECK_INTERVAL_SECONDS=60
       # - FAIL_THRESHOLD=3
       # - LOG_LEVEL=info
+      # Optional: hook scripts for failure/recovery/port-change notifications.
+      # - ON_FAILURE_SCRIPT=/scripts/notify.sh failure
+      # - ON_RECOVERY_SCRIPT=/scripts/notify.sh recover
+      # - ON_PORT_CHANGE_SCRIPT=/scripts/notify.sh ports
       # Optional: download an updated pia-wg-config at startup.
       # - PIA_WG_CONFIG_URL=https://example.com/pia-wg-config
       # - PIA_WG_CONFIG_SHA256=...
@@ -32,7 +36,9 @@ services:
       interval: 5s
 
   gluetun:
-    image: qmcgaw/gluetun
+    # Pin to a specific version - gluetun:latest tracks HEAD and can ship regressions.
+    # Check https://github.com/qdm12/gluetun/releases for the latest stable release.
+    image: qmcgaw/gluetun:v3.41.1
     container_name: gluetun
     cap_add:
       - NET_ADMIN

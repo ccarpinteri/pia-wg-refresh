@@ -318,6 +318,32 @@ pia-wg-refresh:
     - /absolute/path/to/test/directory:/absolute/path/to/test/directory
 ```
 
+## Recent Changes (v0.7.0)
+
+### Added
+- **ON_PORT_CHANGE_SCRIPT hook**: New hook that fires whenever the forwarded port changes (including on first discovery). Receives `PIA_FORWARDED_PORT`, `PIA_PREVIOUS_PORT`, and `PIA_SERVER_NAME`. Runs asynchronously like other hooks.
+- **Gluetun v3.39.1+ compatibility note**: Gluetun now makes all control server routes private by default. Users must create `auth/config.toml` in their Gluetun config directory with a targeted role to allow the two read-only endpoints pia-wg-refresh needs (`GET /v1/publicip/ip`, `GET /v1/portforward`).
+- **Sample notification script**: `scripts/pia-wg-refresh-notification.sh` — a Prowl notification example covering all three hook types (failure, recover, ports). Uses `PROWL_API_KEY` env var.
+
+### Environment Variables Added
+- `ON_PORT_CHANGE_SCRIPT` - hook script path for port change events
+
+### Gluetun Auth Fix (applied to Braavos during testing)
+File created at `/volume2/docker/chucktel/gluetun/config/auth/config.toml`:
+```toml
+[[roles]]
+name = "pia-wg-refresh"
+routes = ["GET /v1/publicip/ip", "GET /v1/portforward"]
+auth = "none"
+```
+
+### Gluetun Version Pinning (applied to Braavos 2026-02-25)
+`gluetun:latest` broke twice in one week on Synology NAS:
+1. **2026-02-21**: Auth change (v3.39.1+) — all API routes private by default → fixed with `auth/config.toml`
+2. **2026-02-25**: Conntrack regression (commit `01487b5`, built 2026-02-24) — `flushing conntrack: netfilter query: netlink receive: invalid argument` → Gluetun crashes on startup, incompatible with Synology kernel
+
+Both caused by Synology Container Manager auto-pulling `gluetun:latest`. **Fix: pin to `qmcgaw/gluetun:v3.41.1`** (latest stable, Feb 11 2026) in docker-compose.yml on Braavos and in the repo sample files. Users should disable auto-updates for gluetun or exclude it from Watchtower.
+
 ## Recent Changes (v0.6.1)
 
 ### Changed
