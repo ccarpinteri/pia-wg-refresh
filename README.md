@@ -33,6 +33,8 @@ Required:
 Optional:
 
 - `GLUETUN_CONTAINER` (default: `gluetun`)
+- `GLUETUN_CONTROL_SERVER_HOST` (optional) - if set, the control server API is called directly from pia-wg-refresh using this hostname (e.g. `gluetun` or `gluetun-main`) instead of via `docker exec`. Useful when `docker exec` into the gluetun container is unavailable.
+- `GLUETUN_CONTROL_SERVER_PORT` (default: `8000`) - port for the Gluetun control server API
 - `WG_CONF_PATH` (default: `/config/wg0.conf`)
 - `CHECK_INTERVAL_SECONDS` (default: `60`) - interval when tunnel is down or degraded
 - `HEALTHY_CHECK_INTERVAL_SECONDS` (default: `1800`) - interval when tunnel is healthy
