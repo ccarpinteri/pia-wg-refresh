@@ -404,11 +404,15 @@ restart_gluetun() {
       fi
 
       # Recreate using docker compose (reads updated .env file)
-      log debug "Running: docker compose -p \"$project\" --project-directory \"$DOCKER_COMPOSE_HOST_DIR\" up -d \"$GLUETUN_CONTAINER\""
-      if ! docker_output=$(docker compose -p "$project" --project-directory "$DOCKER_COMPOSE_HOST_DIR" up -d "$GLUETUN_CONTAINER" 2>&1); then
+      log debug "Running: docker compose -p \"$project\" --project-directory \"$DOCKER_COMPOSE_HOST_DIR\" up -d \"$GLUETUN_CONTAINER\" (timeout: ${COMPOSE_UP_TIMEOUT}s)"
+      if ! docker_output=$(timeout "$COMPOSE_UP_TIMEOUT" docker compose -p "$project" --project-directory "$DOCKER_COMPOSE_HOST_DIR" up -d "$GLUETUN_CONTAINER" 2>&1); then
         compose_exit_code=$?
         echo "$docker_output" >> "$DOCKER_LOG"
-        log error "docker compose up -d failed (exit code: $compose_exit_code)"
+        if [ "$compose_exit_code" -eq 124 ]; then
+          log error "docker compose up -d timed out after ${COMPOSE_UP_TIMEOUT}s — container start may be hung at kernel level"
+        else
+          log error "docker compose up -d failed (exit code: $compose_exit_code)"
+        fi
         log debug "Compose output: $docker_output"
         return 1
       else
@@ -444,8 +448,8 @@ restart_gluetun() {
         fi
 
         # Recreate all dependent containers at once - compose handles dependency ordering
-        log debug "Running: docker compose -p \"$project\" --project-directory \"$DOCKER_COMPOSE_HOST_DIR\" up -d $dependent_containers"
-        if docker_output=$(docker compose -p "$project" --project-directory "$DOCKER_COMPOSE_HOST_DIR" up -d $dependent_containers 2>&1); then
+        log debug "Running: docker compose -p \"$project\" --project-directory \"$DOCKER_COMPOSE_HOST_DIR\" up -d $dependent_containers (timeout: ${COMPOSE_UP_TIMEOUT}s)"
+        if docker_output=$(timeout "$COMPOSE_UP_TIMEOUT" docker compose -p "$project" --project-directory "$DOCKER_COMPOSE_HOST_DIR" up -d $dependent_containers 2>&1); then
           echo "$docker_output" >> "$DOCKER_LOG"
           log debug "Compose output: $docker_output"
           log info "All dependent containers recreated successfully"
@@ -464,9 +468,14 @@ restart_gluetun() {
       # If we can't detect project, try using compose without project name
       # This happens on fresh installs where gluetun hasn't started yet
       if [ -f "$DOCKER_COMPOSE_HOST_DIR/docker-compose.yml" ]; then
-        if ! docker_output=$(docker compose --project-directory "$DOCKER_COMPOSE_HOST_DIR" up -d "$GLUETUN_CONTAINER" 2>&1); then
+        if ! docker_output=$(timeout "$COMPOSE_UP_TIMEOUT" docker compose --project-directory "$DOCKER_COMPOSE_HOST_DIR" up -d "$GLUETUN_CONTAINER" 2>&1); then
+          compose_exit_code=$?
           echo "$docker_output" >> "$DOCKER_LOG"
-          log error "Failed to start $GLUETUN_CONTAINER via compose"
+          if [ "$compose_exit_code" -eq 124 ]; then
+            log error "docker compose up -d timed out after ${COMPOSE_UP_TIMEOUT}s — container start may be hung at kernel level"
+          else
+            log error "Failed to start $GLUETUN_CONTAINER via compose (exit code: $compose_exit_code)"
+          fi
           log debug "Compose output: $docker_output"
           return 1
         else
@@ -489,12 +498,12 @@ restart_gluetun() {
   sleep 10
 
   # Verify container is actually running
-  if ! docker inspect "$GLUETUN_CONTAINER" >/dev/null 2>&1; then
-    log error "Container $GLUETUN_CONTAINER does not exist after recreation attempt"
+  if ! timeout 10 docker inspect "$GLUETUN_CONTAINER" >/dev/null 2>&1; then
+    log error "Container $GLUETUN_CONTAINER does not exist or inspect timed out after recreation attempt"
     return 1
   fi
 
-  container_state=$(docker inspect -f '{{.State.Status}}' "$GLUETUN_CONTAINER" 2>/dev/null)
+  container_state=$(timeout 10 docker inspect -f '{{.State.Status}}' "$GLUETUN_CONTAINER" 2>/dev/null)
   log debug "Container state after recreation: $container_state"
 
   if [ "$container_state" != "running" ]; then

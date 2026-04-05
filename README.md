@@ -46,6 +46,7 @@ Optional:
 - `ON_FAILURE_SCRIPT` (optional) - script to run when failure threshold is reached
 - `ON_RECOVERY_SCRIPT` (optional) - script to run when tunnel recovers
 - `ON_PORT_CHANGE_SCRIPT` (optional) - script to run when the forwarded port changes
+- `COMPOSE_UP_TIMEOUT` (default: `300`) - seconds before `docker compose up` is killed if hung; prevents pia-wg-refresh from freezing permanently if the docker daemon's container start hangs at the kernel level
 - `PIA_WG_CONFIG_BIN` (default: `/usr/local/bin/pia-wg-config`)
 - `PIA_WG_CONFIG_URL` (optional: if set, download/replace `pia-wg-config` on startup)
 - `PIA_WG_CONFIG_SHA256` (optional: verify the download before installing)

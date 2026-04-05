@@ -1,5 +1,9 @@
 # pia-wg-refresh - Project Context for Claude
 
+## Working with Claude
+
+- **Evidence only — no speculation.** Do not assert causes, states, or behaviors that are not directly supported by observed data (logs, command output, code). If something is unknown, say so explicitly.
+
 ## Project Overview
 
 **pia-wg-refresh** is a Docker container that automatically refreshes Private Internet Access (PIA) WireGuard configs for Gluetun. It monitors VPN connectivity and regenerates `wg0.conf` only when the tunnel is actually down.
@@ -209,6 +213,7 @@ pia-wg-refresh:
 - `HEALTHY_CHECK_INTERVAL_SECONDS` (default: `1800`)
 - `FAIL_THRESHOLD` (default: `3`)
 - `LOG_LEVEL` (default: `info`)
+- `COMPOSE_UP_TIMEOUT` (default: `300`) - seconds before `docker compose up` is killed if hung
 
 ## Docker Compose Configuration (Port Forwarding)
 
