@@ -1,6 +1,6 @@
 FROM golang:1.23-alpine AS pia
 
-ARG PIA_WG_CONFIG_REF=1a236976eedeeb26dba5630e3bd03e2ab5e47572
+ARG PIA_WG_CONFIG_REF=v1.0.6
 
 RUN apk add --no-cache git
 
