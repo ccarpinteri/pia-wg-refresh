@@ -323,6 +323,23 @@ pia-wg-refresh:
     - /absolute/path/to/test/directory:/absolute/path/to/test/directory
 ```
 
+## Recent Changes (v0.8.0)
+
+### What changed
+
+- **pia-wg-config fork**: Switched bundled binary from `Ephemeral-Dust/pia-wg-config` to `ccarpinteri/pia-wg-config` (v1.0.6). The upstream forks are unmaintained and have a panic bug when PIA's new-format servers (`Server-XXXXX-Xa`) time out on token generation — `getMetadataServerForRegion()` returns an empty slice and panics on index `[0]`. The fix uses PIA's central token API instead, matching PIA's own manual-connections scripts. As of April 2026, 75+ regions are affected.
+- **COMPOSE_UP_TIMEOUT**: Prevents pia-wg-refresh from hanging permanently if `docker compose up` stalls at the kernel level (e.g. on Synology NAS). Defaults to 300 seconds.
+
+### New environment variables
+
+- `COMPOSE_UP_TIMEOUT` (default: `300`) — seconds before `docker compose up` is killed if hung
+
+### pia-wg-config fork details
+
+- Fork: `ccarpinteri/pia-wg-config` at tag `v1.0.6`
+- Fix filed upstream at: [kylegrantlucas/pia-wg-config#12](https://github.com/kylegrantlucas/pia-wg-config/issues/12)
+- Root cause: PIA new-format meta servers accept TLS but never respond to `/authv3/generateToken`
+
 ## Recent Changes (v0.7.0)
 
 ### Added

@@ -301,6 +301,7 @@ This container requires the Docker socket and can restart other containers. It i
 - The bundled generator writes `wg0.conf` inside `/config`. This container validates the new config before replacing the existing one.
 - VPN status is checked via Gluetun's control server API at `localhost:8000`, which responds instantly regardless of VPN state.
 - Port forwarding status is monitored via the `/v1/portforward` endpoint when `PIA_PORT_FORWARDING=true`.
+- The bundled `pia-wg-config` binary is built from [ccarpinteri/pia-wg-config](https://github.com/ccarpinteri/pia-wg-config) (a fork of Ephemeral-Dust/pia-wg-config). The fork fixes token generation failures on PIA's newer servers (`Server-XXXXX-Xa` naming format) by using PIA's central token API instead of the regional meta server endpoint.
 
 ## Development
 
