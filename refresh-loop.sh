@@ -371,6 +371,14 @@ restart_gluetun() {
   pending_recovery=1
 
   if [ -n "${DOCKER_COMPOSE_HOST_DIR:-}" ]; then
+    # Sync SERVER_NAMES in .env from current wg0.conf before recreating the container.
+    # Without this, gluetun starts with a stale or empty SERVER_NAMES and exits with
+    # code 2 when VPN_PORT_FORWARDING=on and VPN_PORT_FORWARDING_PROVIDER is set.
+    new_server=$(get_current_server_name)
+    if [ -n "$new_server" ]; then
+      update_env_server_names "$new_server"
+    fi
+
     # Auto-detect project name from container labels (if container exists)
     project=$(get_compose_project)
     if [ -n "$project" ]; then
