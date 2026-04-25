@@ -323,6 +323,16 @@ pia-wg-refresh:
     - /absolute/path/to/test/directory:/absolute/path/to/test/directory
 ```
 
+## Recent Changes (v0.8.1)
+
+### Changes
+
+- **SERVER_NAMES sync on config regeneration**: `restart_gluetun()` now reads the server name from the current `wg0.conf` and updates `.env` via `update_env_server_names()` before stopping and recreating the gluetun container. Previously this was only done on the port-forwarding mismatch path, not on the connectivity-failure config-regen path. With `VPN_PORT_FORWARDING=on` and `VPN_PORT_FORWARDING_PROVIDER=private internet access`, an empty `SERVER_NAMES` caused gluetun to exit with code 2 on every restart, creating a crash loop.
+
+### Key fix location
+
+- `refresh-loop.sh` `restart_gluetun()` — added `get_current_server_name` + `update_env_server_names` call at the top of the `DOCKER_COMPOSE_HOST_DIR` block, before `docker stop`/`docker rm`/`docker compose up -d`
+
 ## Recent Changes (v0.8.0)
 
 ### What changed
