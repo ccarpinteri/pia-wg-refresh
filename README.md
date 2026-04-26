@@ -2,7 +2,7 @@
 
 Automatically refreshes Private Internet Access (PIA) WireGuard configs for Gluetun only when the tunnel is actually down. It runs alongside Gluetun in Docker, regenerates `wg0.conf` with a bundled `pia-wg-config` binary built from source, and restarts the Gluetun container only after consecutive failures.
 
-This project bundles the [Ephemeral-Dust fork](https://github.com/Ephemeral-Dust/pia-wg-config) of [pia-wg-config](https://github.com/kylegrantlucas/pia-wg-config) (originally by Kyle Lucas), which generates WireGuard configurations for PIA. It is the tool [recommended by the Gluetun documentation](https://github.com/qdm12/gluetun-wiki/blob/main/setup/providers/private-internet-access.md#wireguard) for PIA WireGuard setups. The fork adds support for server name output and port-forwarding server filtering.
+This project bundles a forked [pia-wg-config](https://github.com/ccarpinteri/pia-wg-config) binary (originally by Kyle Lucas, forked via Ephemeral-Dust), which generates WireGuard configurations for PIA. It is the tool [recommended by the Gluetun documentation](https://github.com/qdm12/gluetun-wiki/blob/main/setup/providers/private-internet-access.md#wireguard) for PIA WireGuard setups. The fork adds support for server name output, port-forwarding server filtering, and fixes token generation on PIA's newer server format.
 
 ## Why
 
