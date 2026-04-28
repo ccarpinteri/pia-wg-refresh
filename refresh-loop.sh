@@ -330,13 +330,20 @@ get_dependent_containers() {
     return
   fi
 
-  # Find all containers with NetworkMode = container:<gluetun_id>
+  # Find containers with NetworkMode = container:<gluetun_id> and return their
+  # compose SERVICE NAME (from label), not the container name. Container names
+  # can be ID-prefixed (e.g. 2f4d448528bb_bazarr) when a previous recreation
+  # left a stale container occupying the normal name — those ID-prefixed names
+  # are not valid compose service names and will cause "no such service" errors.
   docker ps -a --format '{{.Names}}' | while read container; do
     network_mode=$(docker inspect --format='{{.HostConfig.NetworkMode}}' "$container" 2>/dev/null || true)
     if [ "$network_mode" = "container:$gluetun_id" ]; then
-      echo "$container"
+      service=$(docker inspect --format='{{index .Config.Labels "com.docker.compose.service"}}' "$container" 2>/dev/null || true)
+      if [ -n "$service" ]; then
+        echo "$service"
+      fi
     fi
-  done
+  done | sort -u
 }
 
 # Perform docker restart with error handling and logging
@@ -435,27 +442,21 @@ restart_gluetun() {
       if [ -n "$dependent_containers" ]; then
         log info "Recreating dependent containers..."
 
-        # Stop all dependent containers at once (much faster than one-by-one)
-        log debug "Stopping dependent containers: $dependent_containers"
-        if docker_output=$(docker stop $dependent_containers 2>&1); then
-          echo "$docker_output" >> "$DOCKER_LOG"
-          log debug "All dependent containers stopped"
-        else
-          echo "$docker_output" >> "$DOCKER_LOG"
-          log debug "Some containers failed to stop: $docker_output"
-        fi
+        # dependent_containers is a deduplicated list of compose SERVICE NAMES.
+        # For each service, stop and remove ALL containers with that service label
+        # (including stale ID-prefixed containers from previous failed recreations).
+        # This ensures compose can create a fresh container with the correct name
+        # and network namespace when it runs up -d.
+        log debug "Stopping and removing all containers for dependent services: $dependent_containers"
+        for service in $dependent_containers; do
+          service_containers=$(docker ps -a --filter "label=com.docker.compose.project=$project" --filter "label=com.docker.compose.service=$service" --format '{{.Names}}' 2>/dev/null)
+          for c in $service_containers; do
+            docker_output=$(docker stop "$c" 2>&1); echo "$docker_output" >> "$DOCKER_LOG"
+            docker_output=$(docker rm "$c" 2>&1); echo "$docker_output" >> "$DOCKER_LOG"
+          done
+        done
 
-        # Remove all dependent containers at once
-        log debug "Removing dependent containers: $dependent_containers"
-        if docker_output=$(docker rm $dependent_containers 2>&1); then
-          echo "$docker_output" >> "$DOCKER_LOG"
-          log debug "All dependent containers removed"
-        else
-          echo "$docker_output" >> "$DOCKER_LOG"
-          log debug "Some containers failed to remove: $docker_output"
-        fi
-
-        # Recreate all dependent containers at once - compose handles dependency ordering
+        # Recreate all dependent services - compose handles dependency ordering
         log debug "Running: docker compose -p \"$project\" --project-directory \"$DOCKER_COMPOSE_HOST_DIR\" up -d $dependent_containers (timeout: ${COMPOSE_UP_TIMEOUT}s)"
         if docker_output=$(timeout "$COMPOSE_UP_TIMEOUT" docker compose -p "$project" --project-directory "$DOCKER_COMPOSE_HOST_DIR" up -d $dependent_containers 2>&1); then
           echo "$docker_output" >> "$DOCKER_LOG"
