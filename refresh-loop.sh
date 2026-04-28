@@ -798,16 +798,18 @@ while true; do
     fi
 
     if [ "$failure_count" -ge "$FAIL_THRESHOLD" ]; then
-      run_failure_hook "connectivity"
       if [ "$generation_failures" -ge "$MAX_GENERATION_RETRIES" ]; then
         log error "Max generation retries ($MAX_GENERATION_RETRIES) reached, waiting for connectivity to recover"
+        failure_count=0
       elif generate_config; then
+        run_failure_hook "connectivity"
         restart_gluetun
         failure_count=0
         generation_failures=0
       else
         generation_failures=$((generation_failures + 1))
         log error "Config generation failed ($generation_failures/$MAX_GENERATION_RETRIES)"
+        run_failure_hook "connectivity"
         failure_count=0
       fi
     fi
