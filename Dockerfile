@@ -1,15 +1,4 @@
-FROM golang:1.23-alpine AS pia
-
-ARG PIA_WG_CONFIG_REF=v1.0.6
-
-RUN apk add --no-cache git
-
-WORKDIR /src
-
-RUN git clone https://github.com/ccarpinteri/pia-wg-config.git . \
-  && git checkout "$PIA_WG_CONFIG_REF" \
-  && go build -o pia-wg-config . \
-  && cp /src/pia-wg-config /tmp/pia-wg-config
+FROM ghcr.io/ccarpinteri/pia-wg-config:latest AS pia
 
 FROM alpine:3.20
 
@@ -17,7 +6,7 @@ RUN apk add --no-cache ca-certificates docker-cli docker-cli-compose curl
 
 WORKDIR /app
 
-COPY --from=pia /tmp/pia-wg-config /usr/local/bin/pia-wg-config
+COPY --from=pia /usr/local/bin/pia-wg-config /usr/local/bin/pia-wg-config
 RUN chmod +x /usr/local/bin/pia-wg-config
 
 COPY entrypoint.sh /app/entrypoint.sh

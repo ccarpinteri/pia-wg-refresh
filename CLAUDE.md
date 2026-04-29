@@ -323,6 +323,26 @@ pia-wg-refresh:
     - /absolute/path/to/test/directory:/absolute/path/to/test/directory
 ```
 
+## Recent Changes (v0.8.2)
+
+### Bug fixes
+
+- **failure_count overflow after max generation retries**: After `MAX_GENERATION_RETRIES` were exhausted, `failure_count` was never reset in the max-retries branch, so it grew unboundedly (e.g. `12/3`, `15/3`). Fixed by resetting `failure_count=0` in the max-retries branch, so the counter cycles correctly: `1/3 → 2/3 → 3/3 → reset`.
+
+- **Failure hook spam during "waiting" state**: `run_failure_hook "connectivity"` was called unconditionally every time `failure_count >= FAIL_THRESHOLD`. Because the counter never reset (bug above), the hook fired every 30 seconds indefinitely while waiting for connectivity to recover — sending a Prowl notification every 30s. Fixed by moving `run_failure_hook` into only the branches that actually take action (`generate_config` success or failure), not the max-retries waiting branch.
+
+- **Dependent containers not restarted after gluetun recreation**: `get_dependent_containers` returned raw container names (e.g. `2f4d448528bb_bazarr`) instead of compose service names. These ID-prefixed names appear when a previous failed recreation left a stale container occupying the normal name. Passing them to `docker compose up -d` caused "no such service" errors, aborting the entire dependent recreation and leaving arr containers stopped. Fixed by reading the `com.docker.compose.service` label to get the proper service name, and by cleaning up ALL containers for each service (including stale ID-prefixed ones) before compose recreates them.
+
+### Key fix locations
+
+- `refresh-loop.sh` lines ~800–813: `failure_count=0` added to max-retries branch; `run_failure_hook` moved inside action branches only
+- `refresh-loop.sh` `get_dependent_containers()`: returns `com.docker.compose.service` label value + `sort -u` dedup instead of `{{.Names}}`
+- `refresh-loop.sh` `restart_gluetun()` dependent stop/rm block: now iterates by service name with `--filter label=` to clean up all containers per service
+
+### Dockerfile
+
+- Switched from building `pia-wg-config` from source (Go build stage) to pulling the pre-built image from `ghcr.io/ccarpinteri/pia-wg-config:latest`. Eliminates the Go build stage, making image builds significantly faster.
+
 ## Recent Changes (v0.8.1)
 
 ### Changes
