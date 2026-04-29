@@ -242,6 +242,13 @@ check_connectivity() {
   return 1
 }
 
+# Check raw internet access from pia-wg-refresh's own network (not via gluetun).
+# Used to detect when internet has been restored after an outage so config
+# generation can be retried even while gluetun's tunnel is still down.
+check_raw_connectivity() {
+  wget -qO- --timeout=10 "$CHECK_URL" > /dev/null 2>&1
+}
+
 # Check port forwarding status via Gluetun control server
 # Returns: 0 = working, 1 = not working
 # Sets global: current_forwarded_port (for port change detection)
@@ -800,7 +807,12 @@ while true; do
 
     if [ "$failure_count" -ge "$FAIL_THRESHOLD" ]; then
       if [ "$generation_failures" -ge "$MAX_GENERATION_RETRIES" ]; then
-        log error "Max generation retries ($MAX_GENERATION_RETRIES) reached, waiting for connectivity to recover"
+        if check_raw_connectivity; then
+          log info "Internet connectivity restored — retrying config generation"
+          generation_failures=0
+        else
+          log error "Max generation retries ($MAX_GENERATION_RETRIES) reached, waiting for connectivity to recover"
+        fi
         failure_count=0
       elif generate_config; then
         run_failure_hook "connectivity"
