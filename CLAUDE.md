@@ -323,6 +323,16 @@ pia-wg-refresh:
     - /absolute/path/to/test/directory:/absolute/path/to/test/directory
 ```
 
+## Recent Changes (v0.8.3)
+
+### Bug fix
+
+- **Internet recovery deadlock after max generation retries**: When `MAX_GENERATION_RETRIES` were exhausted during an internet outage, the loop entered a "waiting for connectivity to recover" state but could never exit it — even after internet was restored. The recovery check used `check_connectivity()`, which queries gluetun's VPN state from inside the gluetun container. But gluetun can't establish a VPN without a valid config, a new config can't be generated without internet, and internet was considered unavailable because gluetun had no VPN — a complete deadlock. Fixed by adding `check_raw_connectivity()`, which runs `wget` from pia-wg-refresh's own bridge network (bypassing gluetun entirely). When raw internet is detected in the max-retries waiting branch, `generation_failures` resets to `0` and config generation retries immediately.
+
+### Key fix location
+
+- `refresh-loop.sh`: new `check_raw_connectivity()` function added after `check_connectivity()`; max-retries branch now calls `check_raw_connectivity()` and resets `generation_failures=0` on success
+
 ## Recent Changes (v0.8.2)
 
 ### Bug fixes
